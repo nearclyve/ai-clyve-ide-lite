@@ -27,7 +27,6 @@ from . import attachments as attach
 from . import config
 from . import stt as stt_mod
 from .agent import AgentSession
-from .audio import MicRecorder, TranscribeWorker
 from .checkpoints import CheckpointStore
 from .server import list_chats, load_chat, save_chat
 
@@ -81,9 +80,11 @@ def md_to_html(text: str) -> str:
     for i, part in enumerate(parts):
         if i % 2 == 1:
             body = part.split("\n", 1)[1] if "\n" in part else part
-            out.append(f"<pre style='background:#0a0d13;border:1px solid {LINE};"
-                       f"border-radius:8px;padding:10px;color:#c8d2e6;'>"
-                       f"{html.escape(body.rstrip())}</pre>")
+            out.append(
+                "<table width='100%' cellspacing='0' cellpadding='8' bgcolor='#0a0d13' "
+                "style='border:1px solid #1e2531;'>"
+                "<tr><td><pre style='margin:0;color:#c8d2e6;font-family:monospace;'>"
+                f"{html.escape(body.rstrip())}</pre></td></tr></table>")
             continue
         t = html.escape(part)
         t = re.sub(r"`([^`\n]+)`",
@@ -125,6 +126,29 @@ def arg_summary(name: str, args: dict) -> str:
 
 
 # --------------------------------------------------------------------- worker
+class ChatInput(QPlainTextEdit):
+    """Input chat yang menerima paste gambar (Ctrl+V) langsung sebagai lampiran."""
+
+    image_pasted = Signal(object)
+
+    def keyPressEvent(self, ev):  # noqa: N802
+        if ev.matches(QKeySequence.Paste):
+            img = QApplication.clipboard().image()
+            if not img.isNull():
+                self.image_pasted.emit(img)
+                return
+        super().keyPressEvent(ev)
+
+    def insertFromMimeData(self, source):  # noqa: N802
+        # Ctrl+V lewat menu/konteks: kalau clipboard berisi gambar, jadikan lampiran.
+        if source is not None and source.hasImage():
+            img = QApplication.clipboard().image()
+            if not img.isNull():
+                self.image_pasted.emit(img)
+                return
+        super().insertFromMimeData(source)
+
+
 class AgentWorker(QThread):
     event = Signal(dict)
 
@@ -380,6 +404,96 @@ class CheckpointsDialog(QDialog):
 
 
 # --------------------------------------------------------------------- window
+class Bubble(QFrame):
+    """Satu pesan chat: kartu berisi label peran + isi (rich text)."""
+
+    def __init__(self, role: str, parent=None):
+        super().__init__(parent)
+        is_user = role == "user"
+        self.setObjectName("userBubble" if is_user else "botBubble")
+        self.setStyleSheet(
+            "QFrame#userBubble{background:#22406f;border:1px solid #4f7cd6;border-radius:14px;}"
+            "QFrame#botBubble{background:#151d2b;border:1px solid #2b3850;border-radius:14px;}")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 10, 14, 12)
+        lay.setSpacing(5)
+        who = QLabel("KAMU" if is_user else "CLYVE")
+        who.setStyleSheet(
+            "color:#cfe0ff;font-size:10px;font-weight:700;letter-spacing:0.6px;"
+            if is_user else
+            f"color:{OK};font-size:10px;font-weight:700;letter-spacing:0.6px;")
+        lay.addWidget(who)
+        self.body = QLabel()
+        self.body.setWordWrap(True)
+        self.body.setTextFormat(Qt.RichText)
+        self.body.setOpenExternalLinks(True)
+        self.body.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
+        self.body.setStyleSheet(
+            "color:#f3f7ff;font-size:13px;background:transparent;" if is_user
+            else f"color:{FG};font-size:13px;background:transparent;")
+        lay.addWidget(self.body)
+
+
+class ChatView(QScrollArea):
+    """Daftar bubble chat yang bisa discroll, dengan pemisahan kiri/kanan."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.inner = QWidget()
+        self.inner.setObjectName("chatInner")
+        self.lay = QVBoxLayout(self.inner)
+        self.lay.setContentsMargins(20, 14, 20, 8)
+        self.lay.setSpacing(6)
+        self.lay.addStretch(1)
+        self.setWidget(self.inner)
+        self.setStyleSheet(
+            f"QScrollArea{{background:{BG};border:none;}}"
+            f"QWidget#chatInner{{background:{BG};}}")
+
+    def clear(self):
+        while self.lay.count():
+            item = self.lay.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+
+    def _row(self, widget, align_right: bool):
+        row = QWidget()
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(0)
+        if align_right:
+            rl.addStretch(1)
+        rl.addWidget(widget)
+        if not align_right:
+            rl.addStretch(1)
+        self.lay.addWidget(row)
+        return row
+
+    def add_bubble(self, role: str) -> Bubble:
+        bubble = Bubble(role)
+        avail = self.viewport().width() or self.width() or 900
+        width = max(380, int(avail * (0.74 if role == "user" else 0.84)))
+        bubble.setMinimumWidth(min(width, 520))
+        bubble.setMaximumWidth(width)
+        bubble.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._row(bubble, align_right=(role == "user"))
+        self.scroll_bottom()
+        return bubble
+
+    def add_widget(self, widget):
+        self._row(widget, align_right=False)
+        self.scroll_bottom()
+
+    def scroll_bottom(self):
+        bar = self.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
+
 class MainWindow(QMainWindow):
     def __init__(self, cfg: dict):
         super().__init__()
@@ -393,9 +507,6 @@ class MainWindow(QMainWindow):
         self.current_chat = ""
         self.bridge = ApprovalBridge(self)
         self.session.approval = self.bridge.request
-        self.recorder = MicRecorder(self)
-        self.recording = False
-        self.stt_worker = None
 
         self.setWindowTitle(cfg.get("app_name") or "AI Clyve IDE Lite")
         self.resize(1280, 860)
@@ -464,19 +575,22 @@ class MainWindow(QMainWindow):
         sl.addWidget(self._section("Riwayat chat"))
         self.history = QListWidget()
         self.history.setMinimumHeight(120)
-        self.history.setTextElideMode(Qt.ElideRight)
-        self.history.setWordWrap(False)
+        self.history.setWordWrap(True)
         self.history.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.history.setStyleSheet(
+            f"QListWidget{{background:{PANEL};border:none;color:#b8c2d6;}}"
+            f"QListWidget::item{{padding:6px 8px;border-radius:6px;}}"
+            f"QListWidget::item:selected{{background:#161f31;color:#dbe6ff;}}")
+        pal2 = self.history.palette()
+        pal2.setColor(QPalette.Base, QColor(PANEL))
+        pal2.setColor(QPalette.Text, QColor("#b8c2d6"))
+        self.history.setPalette(pal2)
         self.history.itemClicked.connect(self._open_chat)
         sl.addWidget(self.history, 1)
 
         b_cp = QPushButton("Checkpoint / rollback")
         b_cp.clicked.connect(self._open_checkpoints)
         sl.addWidget(b_cp)
-
-        b_stt = QPushButton("Pengaturan suara (STT)")
-        b_stt.clicked.connect(self._open_stt)
-        sl.addWidget(b_stt)
 
         keyrow = QHBoxLayout()
         self.key_label = QLabel(config.mask(self.cfg.get("api_key", "")))
@@ -507,6 +621,8 @@ class MainWindow(QMainWindow):
         tl.addStretch(1)
         self.status = QLabel("siap")
         self.status.setStyleSheet(f"color:{MUTED};font-size:11.5px;")
+        self.status.setMinimumWidth(110)
+        self.status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         tl.addWidget(self.status)
         self.stop_btn = QPushButton("Stop")
         self.stop_btn.setObjectName("danger")
@@ -515,9 +631,7 @@ class MainWindow(QMainWindow):
         tl.addWidget(self.stop_btn)
         ml.addWidget(top)
 
-        self.chat = QTextBrowser()
-        self.chat.setOpenExternalLinks(True)
-        self.chat.setContentsMargins(20, 16, 20, 6)
+        self.chat = ChatView()
         ml.addWidget(self.chat, 1)
 
         # attachments strip
@@ -539,14 +653,10 @@ class MainWindow(QMainWindow):
         b_att.clicked.connect(self._pick_files)
         bl.addWidget(b_att)
 
-        self.mic_btn = QPushButton("Mic")
-        self.mic_btn.setFixedSize(58, 46)
-        self.mic_btn.setToolTip("Rekam suara lalu jadikan teks (OpenRouter STT)")
-        self.mic_btn.clicked.connect(self._toggle_mic)
-        bl.addWidget(self.mic_btn)
-        self.input = QPlainTextEdit()
+        self.input = ChatInput()
         self.input.setObjectName("input")
-        self.input.setPlaceholderText("Tulis instruksi... (Enter kirim, Shift+Enter baris baru)")
+        self.input.image_pasted.connect(self._paste_image)
+        self.input.setPlaceholderText("Tulis instruksi... (Enter kirim, Shift+Enter baris baru, Ctrl+V tempel gambar)")
         self.input.setFixedHeight(46)
         self.input.installEventFilter(self)
         bl.addWidget(self.input, 1)
@@ -594,7 +704,8 @@ class MainWindow(QMainWindow):
         self.model_box.blockSignals(False)
         self.history.clear()
         for c in list_chats():
-            title = (c["title"] or "(baru)")[:40]
+            raw = (c["title"] or "(baru)").strip().replace("\n", " ")
+            title = raw if len(raw) <= 44 else raw[:43].rstrip() + "…"
             it = QListWidgetItem(title)
             it.setData(Qt.UserRole, c["id"])
             it.setToolTip(c["title"])
@@ -674,63 +785,6 @@ class MainWindow(QMainWindow):
     def _open_checkpoints(self):
         CheckpointsDialog(CheckpointStore(config.config_dir(), self.current_chat), self).exec()
 
-    # ------------------------------------------------------------------ voice
-    def _open_stt(self):
-        dlg = SttDialog(self.cfg, self)
-        if dlg.exec() == QDialog.Accepted:
-            base, model, key = dlg.result
-            self.cfg = stt_mod.save_settings(self.cfg, base, model, key)
-            config.save(self.cfg)
-            self._set_status("pengaturan suara disimpan")
-
-    def _toggle_mic(self):
-        if self.recording:
-            self._stop_mic()
-            return
-        s = stt_mod.settings(self.cfg)
-        if not s["api_key"]:
-            self._open_stt()
-            s = stt_mod.settings(self.cfg)
-            if not s["api_key"]:
-                return
-        ok, err = self.recorder.start()
-        if not ok:
-            self._set_status(f"mic gagal: {err}", ERR)
-            return
-        self.recording = True
-        self.mic_btn.setText("Stop")
-        self.mic_btn.setStyleSheet(f"background:#5a2020;border-color:#7c2c2c;color:#ffd9d9;")
-        self._set_status("merekam… klik Stop untuk transkripsi", WARN)
-
-    def _stop_mic(self):
-        path, err = self.recorder.stop()
-        self.recording = False
-        self.mic_btn.setText("Mic")
-        self.mic_btn.setStyleSheet("")
-        if not path:
-            self._set_status(err or "rekaman gagal", ERR)
-            return
-        self._set_status("transkripsi…", WARN)
-        self.stt_worker = TranscribeWorker(str(path), self.cfg, self)
-        self.stt_worker.done.connect(self._stt_done)
-        self.stt_worker.failed.connect(self._stt_fail)
-        self.stt_worker.start()
-
-    def _stt_done(self, text: str):
-        if not text:
-            self._set_status("tidak ada suara terdeteksi", WARN)
-            return
-        cur = self.input.textCursor()
-        cur.movePosition(QTextCursor.End)
-        prefix = "" if not self.input.toPlainText().strip() else " "
-        cur.insertText(prefix + text)
-        self.input.setFocus()
-        self._set_status("teks dari suara ditambahkan")
-
-    def _stt_fail(self, msg: str):
-        self._set_status("STT error", ERR)
-        QMessageBox.warning(self, "STT gagal", msg[:500])
-
     # ------------------------------------------------------------------ chats
     def _new_chat(self, first=False):
         import uuid
@@ -738,7 +792,7 @@ class MainWindow(QMainWindow):
         self.session.reset()
         self.session.set_chat(self.current_chat)
         self.chat.clear()
-        self.chat.setHtml(self._welcome_html())
+        self._show_welcome()
         self._welcome = True
         if not first:
             self._refresh_models()
@@ -759,51 +813,60 @@ class MainWindow(QMainWindow):
         for m in chat.get("messages") or []:
             self._append_user(m["content"]) if m["role"] == "user" else self._append_bot_html(m["content"])
 
-    def _welcome_html(self) -> str:
-        return (f"<div style='margin-top:60px;text-align:center;'>"
-                f"<div style='font-size:22px;font-weight:700;'>Apa yang mau dibangun?</div>"
-                f"<div style='color:{MUTED};margin-top:10px;'>Agent ini bisa baca/tulis file, "
-                f"jalankan terminal, install paket, query SQLite, hit API, buka folder dan browser.</div>"
-                f"<div style='color:{MUTED};margin-top:6px;'>Mode Review = minta persetujuan tiap "
-                f"perubahan. Mode Plan = rencana saja, tanpa eksekusi.</div></div>")
+    def _show_welcome(self):
+        box = QWidget()
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(0, 60, 0, 0)
+        lay.setSpacing(8)
+        title = QLabel("Apa yang mau dibangun?")
+        title.setStyleSheet(f"color:{FG};font-size:22px;font-weight:700;")
+        title.setAlignment(Qt.AlignCenter)
+        sub = QLabel("Agent ini bisa baca/tulis file, jalankan terminal, install paket, "
+                     "query SQLite, hit API, buka folder dan browser.")
+        sub.setStyleSheet(f"color:{MUTED};font-size:12px;")
+        sub.setWordWrap(True)
+        sub.setAlignment(Qt.AlignCenter)
+        hint = QLabel("Mode Review = minta persetujuan tiap perubahan. "
+                      "Mode Plan = rencana saja, tanpa eksekusi.")
+        hint.setStyleSheet(f"color:{MUTED};font-size:12px;")
+        hint.setWordWrap(True)
+        hint.setAlignment(Qt.AlignCenter)
+        lay.addWidget(title)
+        lay.addWidget(sub)
+        lay.addWidget(hint)
+        self.chat.add_widget(box)
 
     # ------------------------------------------------------------------ chat ui
     def _append_user(self, text: str):
+        bubble = self.chat.add_bubble("user")
         safe = html.escape(text).replace("\n", "<br>")
-        self.chat.append(
-            f"<div style='margin-top:14px;'><span style='color:#9db8ff;font-weight:600;'>kamu</span>"
-            f"<div style='color:{FG};margin-top:2px;'>{safe}</div></div>")
+        bubble.body.setText(safe)
 
-    def _append_bot_html(self, body_html: str, streaming=False):
-        if streaming:
-            self.chat.append(f"<div style='margin-top:10px;'>{body_html}</div>")
-        else:
-            self.chat.append(
-                f"<div style='margin-top:14px;'><span style='color:{OK};font-weight:600;'>Clyve</span>"
-                f"<div style='margin-top:2px;'>{body_html}</div></div>")
+    def _append_bot_html(self, body_html: str, streaming=False) -> Bubble:
+        bubble = self.chat.add_bubble("bot")
+        bubble.body.setText(body_html)
+        return bubble
 
     def _append_tool(self, name: str, detail: str, ok: bool | None):
         color = MUTED if ok is None else (OK if ok else ERR)
         icon = "⋯" if ok is None else ("✓" if ok else "✗")
-        self._left_align()
-        self.chat.append(
-            f"<div style='font-family:monospace;font-size:11px;color:{color};"
-            f"border-left:2px solid {color};padding:2px 0 2px 8px;margin:3px 0;'>"
+        chip = QLabel(
+            f"<span style='font-family:monospace;font-size:11px;color:{color};'>"
             f"{icon} <b>{html.escape(name)}</b> "
-            f"<span style='color:#7d879f'>{html.escape(detail[:150])}</span></div>")
+            f"<span style='color:#7d879f'>{html.escape(detail[:150])}</span></span>")
+        chip.setTextFormat(Qt.RichText)
+        chip.setWordWrap(True)
+        chip.setMinimumWidth(340)
+        chip.setStyleSheet(
+            "background:#0d1420;border:1px solid #1c2536;border-radius:8px;padding:6px 9px;")
+        self.chat.add_widget(chip)
 
-    def _left_align(self):
-        try:
-            self.chat.setAlignment(Qt.AlignLeft)
-        except Exception:  # noqa: BLE001
-            pass
+    def _scroll(self):
+        self.chat.scroll_bottom()
 
     def _set_status(self, text: str, color: str = MUTED):
         self.status.setText(text)
         self.status.setStyleSheet(f"color:{color};font-size:11.5px;")
-
-    def _scroll(self):
-        self.chat.verticalScrollBar().setValue(self.chat.verticalScrollBar().maximum())
 
     # ------------------------------------------------------------------ attach
     def _pick_files(self):
@@ -816,6 +879,27 @@ class MainWindow(QMainWindow):
             except Exception as e:  # noqa: BLE001
                 self._set_status(f"gagal lampirkan: {e}", ERR)
         self._render_atts()
+
+    def _paste_image(self, img):
+        """Simpan gambar dari clipboard sebagai lampiran (tanpa perlu simpan manual)."""
+        if len(self.attachments) >= attach.MAX_FILES:
+            self._set_status(f"maksimal {attach.MAX_FILES} file per pesan", WARN)
+            return
+        try:
+            tmp = Path(self.session.workspace or Path.home()) / f"paste_{int(time.time() * 1000)}.png"
+            tmp.parent.mkdir(parents=True, exist_ok=True)
+            if not img.save(str(tmp), "PNG"):
+                raise RuntimeError("gambar clipboard tidak bisa dibaca")
+            info = attach.save_upload(Path(self.session.workspace or Path.home()), tmp.name, tmp.read_bytes())
+            self.attachments.append(info)
+            self._render_atts()
+            self._set_status(f"gambar ditempel: {info['name']}")
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        except Exception as e:  # noqa: BLE001
+            self._set_status(f"gagal tempel gambar: {e}", ERR)
 
     def _render_atts(self):
         while self.att_row.count() > 1:
@@ -850,7 +934,7 @@ class MainWindow(QMainWindow):
         self._buf = []
         self._tools: dict[str, dict] = {}
         self._stream_started = False
-        self._stream_anchor = None
+        self._stream_bubble = None
 
         self.worker = AgentWorker(self.session, text or "Tolong baca lampiran ini.", atts, self)
         self.worker.event.connect(self._on_event)
@@ -869,15 +953,14 @@ class MainWindow(QMainWindow):
             chunk = ev.get("text") or ""
             self._buf.append(chunk)
             if not self._stream_started:
-                self.chat.append(
-                    f"<div style='margin-top:14px;'><span style='color:{OK};font-weight:600;'>Clyve</span></div>")
-                self._stream_anchor = self.chat.document().characterCount()
+                self._stream_bubble = self.chat.add_bubble("bot")
                 self._stream_started = True
-                chunk = "\n" + chunk
-            cur = self.chat.textCursor()
-            cur.movePosition(QTextCursor.End)
-            cur.insertText(chunk)
-            self._scroll()
+            bubble = getattr(self, "_stream_bubble", None)
+            if bubble is not None:
+                raw = "".join(self._buf)
+                bubble.body.setText(
+                    f"<div style='white-space:pre-wrap;'>{html.escape(raw)}</div>")
+                self.chat.scroll_bottom()
         elif t == "tool_start":
             self._append_tool(ev.get("name", "?"),
                               arg_summary(ev.get("name", ""), ev.get("args") or {}), None)
@@ -895,30 +978,27 @@ class MainWindow(QMainWindow):
             self._set_status("error", ERR)
 
     def _finalize_stream(self, fallback: str):
-        """Replace the plain streamed text with rendered markdown."""
+        """Ganti teks streaming dengan markdown yang sudah dirender."""
         text = "".join(getattr(self, "_buf", [])) or fallback
+        bubble = getattr(self, "_stream_bubble", None)
         if not text.strip():
             self._stream_started = False
+            self._stream_bubble = None
             return
-        if self._stream_started and getattr(self, "_stream_anchor", None):
-            doc = self.chat.document()
-            cur = QTextCursor(doc)
-            cur.setPosition(min(self._stream_anchor, doc.characterCount() - 1))
-            cur.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
-            cur.removeSelectedText()
-            cur.insertHtml(md_to_html(text))
+        if bubble is not None:
+            bubble.body.setText(md_to_html(text))
         else:
             self._append_bot_html(md_to_html(text))
         self._stream_started = False
-        self._stream_anchor = None
-        self._scroll()
+        self._stream_bubble = None
+        self.chat.scroll_bottom()
 
     def _on_finished(self):
         self.busy = False
         self.send_btn.setEnabled(True)
         self.stop_btn.setVisible(False)
         self._stream_started = False
-        self._stream_anchor = None
+        self._stream_bubble = None
         try:
             save_chat(self.current_chat, self.session.snapshot())
         except Exception:  # noqa: BLE001
