@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QPalette, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
@@ -453,6 +453,10 @@ class ChatView(QScrollArea):
         self.lay.setSpacing(10)
         self.lay.addStretch(1)
         self.setWidget(self.inner)
+        self._follow = True
+        bar = self.verticalScrollBar()
+        bar.valueChanged.connect(self._on_scroll)
+        bar.rangeChanged.connect(self._on_range)
         self.setStyleSheet(
             f"QScrollArea{{background:{BG};border:none;}}"
             f"QWidget#chatInner{{background:{BG};}}")
@@ -465,7 +469,7 @@ class ChatView(QScrollArea):
                 widget.setParent(None)
                 widget.deleteLater()
 
-    def _row(self, widget, align_right: bool):
+    def _row(self, widget, align_right: bool, follow: bool = True):
         row = QWidget()
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 0, 0, 0)
@@ -476,26 +480,50 @@ class ChatView(QScrollArea):
         if not align_right:
             rl.addStretch(1)
         self.lay.addWidget(row)
+        if follow:
+            self.scroll_bottom(force=True)
         return row
 
     def add_bubble(self, role: str) -> Bubble:
+        follow = self._at_bottom()
         bubble = Bubble(role)
         avail = self.viewport().width() or self.width() or 900
         width = max(360, int(avail * (0.68 if role == "user" else 0.76)))
         bubble.setMinimumWidth(min(width, 520))
         bubble.setMaximumWidth(width)
         bubble.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self._row(bubble, align_right=(role == "user"))
-        self.scroll_bottom()
+        self._row(bubble, align_right=(role == "user"), follow=follow)
         return bubble
 
     def add_widget(self, widget):
-        self._row(widget, align_right=False)
-        self.scroll_bottom()
+        follow = self._at_bottom()
+        self._row(widget, align_right=False, follow=follow)
 
-    def scroll_bottom(self):
+    def _on_scroll(self, value: int) -> None:
+        bar = self.verticalScrollBar()
+        if value >= bar.maximum() - 8:
+            self._follow = True
+        elif value < bar.maximum() - 32:
+            self._follow = False
+
+    def _on_range(self, _min: int, maximum: int) -> None:
+        if self._follow:
+            self.verticalScrollBar().setValue(maximum)
+
+    def _at_bottom(self) -> bool:
+        bar = self.verticalScrollBar()
+        return self._follow or bar.value() >= bar.maximum() - 32
+
+    def scroll_bottom(self, force: bool = False):
+        """Scroll ke bawah, kecuali user sedang membaca pesan lama."""
+        if not force and not self._at_bottom():
+            return
+        self.lay.activate()
+        self.inner.adjustSize()
         bar = self.verticalScrollBar()
         bar.setValue(bar.maximum())
+        # satu putaran event lagi: tinggi konten baru final setelah layout
+        QTimer.singleShot(0, lambda: bar.setValue(bar.maximum()))
 
 
 class MainWindow(QMainWindow):
@@ -515,6 +543,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(cfg.get("app_name") or "AI Clyve IDE Lite")
         self.resize(1280, 860)
         self._build()
+        self.setMinimumSize(1024, 700)
+        self.showMaximized()
         self._new_chat(first=True)
         self._refresh_models()
 
@@ -581,7 +611,20 @@ class MainWindow(QMainWindow):
         self.mode_box.currentTextChanged.connect(self._mode_changed)
         sl.addWidget(self.mode_box)
 
-        sl.addWidget(self._section("Riwayat chat"))
+        hist_head = QHBoxLayout()
+        hist_head.setSpacing(6)
+        hist_head.addWidget(self._section("Riwayat chat"))
+        hist_head.addStretch(1)
+        self.new_chat_btn = QPushButton("+ Chat baru")
+        self.new_chat_btn.setFixedHeight(26)
+        self.new_chat_btn.setStyleSheet(
+            f"QPushButton{{background:#1a2334;border:1px solid {LINE};border-radius:7px;"
+            f"padding:2px 9px;font-size:11px;font-weight:600;color:#c7d3ea;}}"
+            "QPushButton:hover{background:#22304a;}")
+        self.new_chat_btn.clicked.connect(self._new_chat)
+        hist_head.addWidget(self.new_chat_btn)
+        sl.addLayout(hist_head)
+
         self.history = QListWidget()
         self.history.setMinimumHeight(120)
         self.history.setWordWrap(True)
@@ -809,6 +852,9 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ chats
     def _new_chat(self, first=False):
+        # QPushButton mengirim bool `checked`; jangan sampai dianggap `first`
+        if not isinstance(first, bool):
+            first = False
         import uuid
         self.current_chat = uuid.uuid4().hex[:12]
         self.session.reset()
@@ -818,6 +864,10 @@ class MainWindow(QMainWindow):
         self._welcome = True
         if not first:
             self._refresh_models()
+            if getattr(self, "history", None) is not None:
+                self.history.blockSignals(True)
+                self.history.clearSelection()
+                self.history.blockSignals(False)
 
     def _open_chat(self, item):
         cid = item.data(Qt.UserRole)
@@ -952,6 +1002,7 @@ class MainWindow(QMainWindow):
         self.attachments = []
         self._render_atts()
         self._append_user(text + ("\n📎 " + ", ".join(a["name"] for a in atts) if atts else ""))
+        self.chat.scroll_bottom(force=True)
         self.busy = True
         self.send_btn.setEnabled(False)
         self.stop_btn.setVisible(True)
