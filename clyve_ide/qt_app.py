@@ -46,23 +46,27 @@ QWidget {{ background:{BG}; color:{FG}; font-size:13px; }}
 QFrame#side {{ background:{PANEL}; border-right:1px solid {LINE}; }}
 QLabel#brand {{ font-size:14px; font-weight:700; }}
 QLabel.section {{ color:#828da6; font-size:10px; letter-spacing:1px; }}
-QPushButton {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:8px; padding:6px 10px; }}
+QPushButton {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:8px;
+    padding:7px 12px; min-height:20px; }}
 QPushButton:hover {{ border-color:#3a4560; }}
 QPushButton#primary {{ background:#4a74e8; border-color:#4a74e8; color:white; font-weight:600; padding:8px 16px; }}
 QPushButton#primary:hover {{ background:#5b84f5; }}
 QPushButton#danger {{ background:#5a2020; border-color:#7c2c2c; color:#ffd9d9; }}
 QPushButton:disabled {{ color:#5a6478; border-color:#1e2531; }}
-QComboBox, QLineEdit {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:8px; padding:6px 8px; }}
+QComboBox, QLineEdit {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:8px;
+    padding:6px 10px; min-height:22px; }}
 QComboBox::drop-down {{ border:none; }}
-QPlainTextEdit#input {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:10px; padding:8px; }}
+QPlainTextEdit#input {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:12px;
+    padding:10px 12px; font-size:13px; }}
 QPlainTextEdit#input:focus {{ border-color:#3d6ff0; }}
 QTextBrowser {{ background:{BG}; border:none; }}
 QListWidget {{ background:{PANEL}; border:none; outline:none; }}
 QListWidget::item {{ padding:6px 8px; border-radius:6px; color:#b8c2d6; }}
 QListWidget::item:selected {{ background:#161f31; color:#dbe6ff; }}
 QListWidget::item:hover {{ background:#141925; }}
-QScrollBar:vertical {{ background:transparent; width:9px; margin:0; }}
-QScrollBar::handle:vertical {{ background:#2a3346; border-radius:4px; min-height:24px; }}
+QScrollBar:vertical {{ background:transparent; width:10px; margin:2px; }}
+QScrollBar::handle:vertical {{ background:#2f3a4f; border-radius:4px; min-height:28px; }}
+QScrollBar::handle:vertical:hover {{ background:#3c4a63; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height:0; }}
 QCheckBox {{ color:{MUTED}; spacing:7px; }}
 QCheckBox::indicator {{ width:15px; height:15px; border:1px solid #33405a; border-radius:4px;
@@ -415,7 +419,7 @@ class Bubble(QFrame):
             "QFrame#userBubble{background:#22406f;border:1px solid #4f7cd6;border-radius:14px;}"
             "QFrame#botBubble{background:#151d2b;border:1px solid #2b3850;border-radius:14px;}")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 10, 14, 12)
+        lay.setContentsMargins(16, 11, 16, 13)
         lay.setSpacing(5)
         who = QLabel("KAMU" if is_user else "CLYVE")
         who.setStyleSheet(
@@ -429,8 +433,8 @@ class Bubble(QFrame):
         self.body.setOpenExternalLinks(True)
         self.body.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
         self.body.setStyleSheet(
-            "color:#f3f7ff;font-size:13px;background:transparent;" if is_user
-            else f"color:{FG};font-size:13px;background:transparent;")
+            "color:#f4f8ff;font-size:13.5px;line-height:150%;background:transparent;" if is_user
+            else f"color:{FG};font-size:13.5px;line-height:150%;background:transparent;")
         lay.addWidget(self.body)
 
 
@@ -446,7 +450,7 @@ class ChatView(QScrollArea):
         self.inner.setObjectName("chatInner")
         self.lay = QVBoxLayout(self.inner)
         self.lay.setContentsMargins(20, 14, 20, 8)
-        self.lay.setSpacing(6)
+        self.lay.setSpacing(10)
         self.lay.addStretch(1)
         self.setWidget(self.inner)
         self.setStyleSheet(
@@ -477,7 +481,7 @@ class ChatView(QScrollArea):
     def add_bubble(self, role: str) -> Bubble:
         bubble = Bubble(role)
         avail = self.viewport().width() or self.width() or 900
-        width = max(380, int(avail * (0.74 if role == "user" else 0.84)))
+        width = max(360, int(avail * (0.68 if role == "user" else 0.76)))
         bubble.setMinimumWidth(min(width, 520))
         bubble.setMaximumWidth(width)
         bubble.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -544,8 +548,10 @@ class MainWindow(QMainWindow):
         b_explore = QPushButton("Buka folder")
         b_explore.clicked.connect(self._open_workspace)
         b_switch = QPushButton("Ganti")
+        b_switch.setFixedWidth(78)
         b_switch.clicked.connect(self._choose_workspace)
-        row.addWidget(b_explore)
+        row.setSpacing(6)
+        row.addWidget(b_explore, 1)
         row.addWidget(b_switch)
         sl.addLayout(row)
 
@@ -557,17 +563,20 @@ class MainWindow(QMainWindow):
         b_addroot.clicked.connect(self._add_root)
         sl.addWidget(b_addroot)
         self.full_access = QCheckBox("Akses seluruh disk")
+        self.full_access.setStyleSheet(f"color:#aeb8cc;font-size:11.5px;spacing:8px;")
         self.full_access.setChecked(bool(self.cfg.get("full_access")))
         self.full_access.stateChanged.connect(self._toggle_full_access)
         sl.addWidget(self.full_access)
 
         sl.addWidget(self._section("Model"))
         self.model_box = QComboBox()
+        self.model_box.setFixedHeight(34)
         self.model_box.currentTextChanged.connect(self._model_changed)
         sl.addWidget(self.model_box)
 
         sl.addWidget(self._section("Mode"))
         self.mode_box = QComboBox()
+        self.mode_box.setFixedHeight(34)
         self.mode_box.addItems(["Auto", "Review", "Plan"])
         self.mode_box.currentTextChanged.connect(self._mode_changed)
         sl.addWidget(self.mode_box)
@@ -588,17 +597,26 @@ class MainWindow(QMainWindow):
         self.history.itemClicked.connect(self._open_chat)
         sl.addWidget(self.history, 1)
 
+        sl.addSpacing(4)
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(f"background:{LINE};")
+        sl.addWidget(sep)
+        sl.addSpacing(2)
+
         b_cp = QPushButton("Checkpoint / rollback")
         b_cp.clicked.connect(self._open_checkpoints)
         sl.addWidget(b_cp)
 
         keyrow = QHBoxLayout()
+        keyrow.setSpacing(6)
         self.key_label = QLabel(config.mask(self.cfg.get("api_key", "")))
         self.key_label.setStyleSheet("font-family:monospace;font-size:10.5px;color:#7c869c;"
                                      "border:none;background:transparent;")
         keyrow.addWidget(self.key_label)
         keyrow.addStretch(1)
         b_key = QPushButton("Ganti key")
+        b_key.setFixedWidth(84)
         b_key.clicked.connect(self._change_key)
         keyrow.addWidget(b_key)
         sl.addLayout(keyrow)
@@ -616,12 +634,15 @@ class MainWindow(QMainWindow):
         tl = QHBoxLayout(top)
         tl.setContentsMargins(18, 10, 18, 10)
         self.crumb = QLabel(self.cfg["workspace"])
-        self.crumb.setStyleSheet("font-family:monospace;font-size:11.5px;color:#98a1b6;")
+        self.crumb.setStyleSheet("font-family:monospace;font-size:11.5px;color:#a8b3c7;")
+        self.crumb.setToolTip(self.cfg["workspace"])
         tl.addWidget(self.crumb)
         tl.addStretch(1)
         self.status = QLabel("siap")
         self.status.setStyleSheet(f"color:{MUTED};font-size:11.5px;")
-        self.status.setMinimumWidth(110)
+        self.status.setMinimumWidth(120)
+        self.status.setMaximumWidth(320)
+        self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         tl.addWidget(self.status)
         self.stop_btn = QPushButton("Stop")
@@ -657,12 +678,13 @@ class MainWindow(QMainWindow):
         self.input.setObjectName("input")
         self.input.image_pasted.connect(self._paste_image)
         self.input.setPlaceholderText("Tulis instruksi... (Enter kirim, Shift+Enter baris baru, Ctrl+V tempel gambar)")
-        self.input.setFixedHeight(46)
+        self.input.setFixedHeight(52)
         self.input.installEventFilter(self)
         bl.addWidget(self.input, 1)
         self.send_btn = QPushButton("Kirim")
         self.send_btn.setObjectName("primary")
-        self.send_btn.setFixedHeight(46)
+        self.send_btn.setFixedWidth(96)
+        self.send_btn.setFixedHeight(52)
         self.send_btn.clicked.connect(self._send)
         bl.addWidget(self.send_btn)
         ml.addWidget(bottom)
@@ -676,7 +698,7 @@ class MainWindow(QMainWindow):
     def _section(self, text: str) -> QLabel:
         lab = QLabel(text.upper())
         lab.setProperty("class", "section")
-        lab.setStyleSheet("color:#828da6;font-size:10px;letter-spacing:1.2px;")
+        lab.setStyleSheet("color:#93a0b8;font-size:10px;font-weight:700;letter-spacing:1.1px;")
         return lab
 
     # ------------------------------------------------------------------ events
@@ -811,7 +833,10 @@ class MainWindow(QMainWindow):
         self._welcome = False
         self.chat.clear()
         for m in chat.get("messages") or []:
-            self._append_user(m["content"]) if m["role"] == "user" else self._append_bot_html(m["content"])
+            if m["role"] == "user":
+                self._append_user(m["content"])
+            else:
+                self._append_bot_html(md_to_html(m["content"] or ""))
 
     def _show_welcome(self):
         box = QWidget()
