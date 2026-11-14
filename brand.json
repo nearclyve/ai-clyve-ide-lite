@@ -1,0 +1,8 @@
+{
+  "app_name": "AI Clyve IDE Lite",
+  "base_url": "https://ai.clyve.id/v1",
+  "lock_base_url": true,
+  "lock_model": false,
+  "default_model": "ai-clyve-1",
+  "models": []
+}

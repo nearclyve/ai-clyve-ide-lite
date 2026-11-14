@@ -1,0 +1,41 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller PySide6 pypdf
+
+      - name: Smoke import
+        run: python -c "import clyve_ide.agent, clyve_ide.qt_app; print('import ok')"
+
+      - name: Build onefile exe
+        run: |
+          pyinstaller --onefile --noconfirm --clean `
+            --name AIClyveIDELite `
+            --add-data "web;web" `
+            --add-data "brand.json;." `
+            app.py
+
+      - name: List output
+        run: dir dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AIClyveIDELite-windows
+          path: dist/AIClyveIDELite.exe
+          if-no-files-found: error

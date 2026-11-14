@@ -1,0 +1,10 @@
+# UI desktop native (Qt):
+#   pip install PySide6
+# PDF lebih akurat dengan pypdf (tanpa ini pakai extractor bawaan):
+#   pip install pypdf
+# Opsional, hanya kalau mau pakai UI web:
+#   pip install pywebview
+# Opsional, hanya untuk bikin .exe:
+#   pip install pyinstaller
+#
+# Tanpa PySide6, app jatuh ke UI web otomatis (python app.py --ui web).

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Clyve IDE Lite</title>
+<link rel="stylesheet" href="/styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◈</text></svg>" />
+</head>
+<body>
+
+<!-- ============================ setup gate ============================ -->
+<div id="gate" class="gate hidden">
+  <div class="gate-card">
+    <div class="logo">◈</div>
+    <h1>AI Clyve IDE Lite</h1>
+    <p class="muted">Masukkan API key dari akun <b>ai.clyve.id</b> kamu. Key disimpan lokal
+      di komputer ini, tidak dikirim ke mana pun selain gateway Clyve.</p>
+    <label class="field">
+      <span>API key</span>
+      <input id="gateKey" type="password" placeholder="sk-... / key akun Clyve" autocomplete="off" spellcheck="false" />
+    </label>
+    <label class="field">
+      <span>Base URL</span>
+      <input id="gateBase" type="text" value="https://ai.clyve.id/v1" spellcheck="false" />
+    </label>
+    <div id="gateErr" class="err hidden"></div>
+    <button id="gateBtn" class="primary wide">Hubungkan</button>
+    <p class="tiny muted">Belum punya key? Login ke <a href="https://ai.clyve.id" target="_blank" rel="noreferrer">ai.clyve.id</a> lalu buat API key di dashboard.</p>
+  </div>
+</div>
+
+<!-- ============================ app shell ============================ -->
+<div id="shell" class="shell hidden">
+
+  <aside class="side">
+    <div class="side-top">
+      <div class="brand">◈ <span>AI Clyve IDE Lite</span></div>
+      <button id="newChat" class="ghost" title="Chat baru">+</button>
+    </div>
+
+    <div class="block">
+      <div class="block-label">Workspace</div>
+      <button id="wsBtn" class="ws-btn" title="Ganti folder kerja">
+        <span id="wsPath" class="mono">-</span>
+        <span class="chev">▾</span>
+      </button>
+      <div class="row">
+        <button id="exploreBtn" class="mini">Buka folder</button>
+        <button id="pickBtn" class="mini">Ganti</button>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="block-label">Akses folder</div>
+      <div id="roots" class="roots"></div>
+      <div class="row">
+        <button id="addRoot" class="mini">+ Folder</button>
+      </div>
+      <label class="switch" title="Izinkan agent menyentuh seluruh disk. Hati-hati: shell sudah punya akses penuh.">
+        <input id="fullAccess" type="checkbox" />
+        <span class="track"><span class="knob"></span></span>
+        <span class="switch-label">Akses seluruh disk</span>
+      </label>
+    </div>
+
+    <div class="block">
+      <div class="block-label">Model</div>
+      <select id="modelSel" class="select"></select>
+    </div>
+
+    <div class="block grow">
+      <div class="block-label">Riwayat chat</div>
+      <div id="chatList" class="chat-list"></div>
+    </div>
+
+    <div class="side-foot">
+      <div class="keyline mono"><span id="keyMasked">-</span> <span class="dot ok"></span></div>
+      <button id="keyBtn" class="mini">Ganti API key</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="crumbs mono" id="crumbWs">-</div>
+      <div class="spacer"></div>
+      <span class="status"><span id="statusDot" class="dot ok"></span><span id="status">siap</span></span>
+      <button id="stopBtn" class="danger hidden">Stop</button>
+    </header>
+
+    <div id="chat" class="chat">
+      <div id="chatInner" class="chat-inner">
+      <div id="welcome" class="welcome">
+        <h2>Apa yang mau dibangun?</h2>
+        <p class="muted">Agent ini bisa baca/tulis file di workspace, jalanin terminal, install paket,
+          query SQLite, hit API, buka folder dan browser. Semua tool langsung jalan tanpa konfirmasi.</p>
+        <div class="chips">
+          <button class="chip" data-t="Buat REST API Flask dengan endpoint /health dan /tambah, jalankan, lalu test pakai curl dan buka di browser.">Flask API + test</button>
+          <button class="chip" data-t="Buat script Python yang scrape 10 judul berita dari https://news.ycombinator.com dan simpan ke CSV.">Scraper ke CSV</button>
+          <button class="chip" data-t="Analisa semua file .py di workspace ini: jelaskan struktur dan temukan bug potensial.">Review project</button>
+          <button class="chip" data-t="Buat aplikasi GUI Tkinter kalkulator, jalankan, dan pastikan tidak error.">App GUI</button>
+        </div>
+      </div>
+      </div>
+    </div>
+
+    <footer class="composer">
+      <div id="attachBar" class="attach-bar hidden"></div>
+      <div class="composer-row">
+        <button id="attachBtn" class="icon-btn" title="Lampirkan file: gambar, PDF, docx/xlsx, teks/kode">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 1 1 5.65 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/>
+          </svg>
+        </button>
+        <textarea id="input" rows="1" placeholder="Tulis instruksi... (Enter kirim, Shift+Enter baris baru)"></textarea>
+        <button id="send" class="primary">Kirim</button>
+      </div>
+      <input id="fileInput" type="file" multiple hidden />
+    </footer>
+  </main>
+</div>
+
+<!-- ============================ folder picker ============================ -->
+<div id="picker" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <b>Pilih workspace</b>
+      <button id="pickClose" class="ghost">✕</button>
+    </div>
+    <div class="picker-path mono" id="pickPath">-</div>
+    <div class="picker-tools">
+      <button id="pickUp" class="mini">↑ Naik</button>
+      <button id="pickHere" class="mini primary">Pakai folder ini</button>
+    </div>
+    <div id="pickList" class="pick-list"></div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
