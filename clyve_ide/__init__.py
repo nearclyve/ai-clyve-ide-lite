@@ -7,4 +7,4 @@ Package layout:
     clyve_ide.server  - local HTTP server + JSON API + SSE
 """
 
-__version__ = "1.0.0"
+from .version import __version__  # noqa: F401  (satu sumber: clyve_ide/version.py)

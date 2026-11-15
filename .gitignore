@@ -8,3 +8,4 @@ dist/
 settings.json
 .DS_Store
 Thumbs.db
+platform_win/version_info.txt

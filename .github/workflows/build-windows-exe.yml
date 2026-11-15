@@ -1,12 +1,19 @@
-name: Build Windows EXE
+name: Build Windows App
 
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
+env:
+  APP_NAME: AIClyveIDELite
+
 jobs:
-  windows-exe:
+  windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,27 +22,73 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Versi app
+        id: ver
+        shell: pwsh
+        run: |
+          $v = python -c "from clyve_ide.version import __version__; print(__version__)"
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "versi: $v"
+
       - name: Install build deps
         run: |
           python -m pip install --upgrade pip
           python -m pip install pyinstaller PySide6 pypdf
 
       - name: Smoke import
-        run: python -c "import clyve_ide.agent, clyve_ide.qt_app; print('import ok')"
+        run: python -c "import clyve_ide.agent, clyve_ide.qt_app, clyve_ide.updater, clyve_ide.gitutil; print('import ok')"
 
-      - name: Build onefile exe
+      - name: Siapkan brand.json
+        shell: pwsh
+        run: if (-not (Test-Path brand.json)) { Copy-Item brand.example.json brand.json }
+
+      - name: Version resource
+        run: python scripts/make_version_info.py
+
+      - name: Build app (onedir, tanpa console)
+        shell: pwsh
         run: |
-          pyinstaller --onefile --noconfirm --clean `
-            --name AIClyveIDELite `
+          pyinstaller --onedir --windowed --noconfirm --clean `
+            --name $env:APP_NAME `
             --add-data "web;web" `
             --add-data "brand.json;." `
+            --version-file "platform_win/version_info.txt" `
+            --collect-submodules clyve_ide `
+            --exclude-module tkinter `
             app.py
+          dir dist
 
-      - name: List output
-        run: dir dist
+      - name: Paket portable (zip)
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/$env:APP_NAME/*" `
+            -DestinationPath "dist/$env:APP_NAME-${{ steps.ver.outputs.version }}-portable-win64.zip" -Force
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC tidak ditemukan" }
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" "installer\AIClyveIDELite.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC gagal" }
+          dir dist
 
       - uses: actions/upload-artifact@v4
         with:
           name: AIClyveIDELite-windows
-          path: dist/AIClyveIDELite.exe
+          path: |
+            dist/AIClyveIDELite-Setup-*.exe
+            dist/*-portable-win64.zip
           if-no-files-found: error
+
+      - name: Release (kalau tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/AIClyveIDELite-Setup-*.exe
+            dist/*-portable-win64.zip
+          generate_release_notes: true

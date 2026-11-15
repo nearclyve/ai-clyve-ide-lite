@@ -13,13 +13,49 @@ jalankan terminal, baca PDF/gambar, dan ngoding bareng model Clyve.
 - **BYOK** — user isi API key dari akun ai.clyve.id, disimpan lokal.
 - **Endpoint terkunci** ke `https://ai.clyve.id/v1`, model default `ai-clyve-1`.
 
-## Download / build
+## Install (Windows)
 
-Build otomatis di GitHub Actions (Windows): tab **Actions** -> workflow
-**Build Windows EXE** -> run hijau -> **Artifacts** -> `AIClyveIDELite-windows`.
+1. Unduh `AIClyveIDELite-Setup-<versi>.exe` dari tab **Releases** repo ini.
+2. Jalankan installer. Pemasangan **per-user** (tanpa admin/UAC), muncul di
+   **Apps & Features**, plus shortcut **Start Menu** dan Desktop.
+3. Buka dari Start Menu. Tidak ada window terminal yang ikut terbuka
+   (build memakai PyInstaller `--windowed`).
 
-Manual di Windows: `python app.py` (butuh Python 3.10+), atau jalankan
-`build_exe.ps1` untuk menghasilkan `dist/AIClyveIDELite.exe`.
+Update tidak perlu download manual:
+
+- App cek rilis GitHub saat dibuka. Kalau ada versi lebih baru, muncul dialog
+  berisi catatan rilis -> **Update sekarang** -> installer diunduh, app ditutup,
+  update dipasang senyap, lalu app dibuka lagi.
+- Cek manual lewat tombol **Cek update** di topbar.
+- Nomor versi terpasang tampil di sidebar (`v1.1.0`).
+- Update tidak menghapus settings: API key + riwayat chat ada di
+  `%APPDATA%\clyve-ide`, di luar folder instalasi.
+
+## Rilis versi baru (maintainer)
+
+Versi hanya didefinisikan di `clyve_ide/version.py`. Alur rilis:
+
+```bash
+# 1. naikkan __version__ di clyve_ide/version.py
+# 2. commit
+git commit -am "chore(release): v1.2.0"
+# 3. push tag -> CI build installer + portable zip, lalu publish GitHub Release
+git tag v1.2.0 && git push origin main --tags
+```
+
+CI (`.github/workflows/build-windows-exe.yml`) menghasilkan:
+
+- `AIClyveIDELite-Setup-<versi>.exe` — installer Inno Setup (yang dipakai updater)
+- `AIClyveIDELite-<versi>-portable-win64.zip` — versi portable tanpa install
+
+Updater mengambil **release terbaru non-draft** dari `api.github.com`, jadi
+setelah tag di-push tidak ada langkah manual lain.
+
+## Build manual
+
+Windows: `build_exe.ps1` (butuh Python 3.10+; installer butuh Inno Setup 6:
+`winget install JRSoftware.InnoSetup`). Hasil: `dist/AIClyveIDELite/` (app) dan
+`dist/AIClyveIDELite-Setup-<versi>.exe` (installer). Development: `python app.py`.
 
 ## Fitur
 
@@ -246,9 +282,19 @@ clyve_ide/
   agent.py          # loop streaming, mode auto/review/plan, eksekusi tool
   checkpoints.py    # snapshot file + rollback
   attachments.py    # simpan upload, ekstrak teks (pdf/docx/xlsx), part vision
-  qt_app.py         # UI desktop native (PySide6)
+  qt_app.py         # window utama + chat + dialog (PySide6)
+  ui/
+    theme.py        # palet + QSS tunggal
+    activity.py     # blok "Working · N" (baris tool update in-place)
+    changes.py      # panel Changes: status git + diff + commit
+    terminal.py     # terminal interaktif (QProcess)
+  gitutil.py        # status/diff/commit via subprocess git
+  updater.py        # cek rilis GitHub + unduh installer
+  version.py        # satu sumber versi (dipakai app, updater, CI)
   server.py         # HTTP server + REST + SSE (UI web)
   desktop.py        # jendela web: pywebview -> --app -> browser
+installer/          # script Inno Setup
+scripts/            # generator version resource Windows
 web/
   index.html        # UI web (opsional)
   styles.css

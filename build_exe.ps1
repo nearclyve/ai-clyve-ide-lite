@@ -78,21 +78,42 @@ Write-Host "Install PyInstaller + PySide6..." -ForegroundColor Cyan
 
 Write-Host "Membungkus app..." -ForegroundColor Cyan
 if (-not (Test-Path "brand.json")) { Copy-Item "brand.example.json" "brand.json" }
-& ".\.venv\Scripts\pyinstaller.exe" --onefile --noconfirm --clean `
+& $vpy scripts/make_version_info.py
+& ".\.venv\Scripts\pyinstaller.exe" --onedir --windowed --noconfirm --clean `
   --name AIClyveIDELite `
   --add-data "web;web" `
   --add-data "brand.json;." `
+  --version-file "platform_win\version_info.txt" `
   --collect-submodules clyve_ide `
   --exclude-module tkinter `
   app.py
 
-Write-Host ""
-if (Test-Path "dist\AIClyveIDELite.exe") {
-  $mb = [math]::Round((Get-Item "dist\AIClyveIDELite.exe").Length / 1MB, 1)
-  Write-Host "Selesai -> dist\AIClyveIDELite.exe ($mb MB)" -ForegroundColor Green
-  Write-Host "Jalankan: .\dist\AIClyveIDELite.exe" -ForegroundColor Green
-  Write-Host "Kalau Defender nge-flag: false positive PyInstaller onefile (unsigned)." -ForegroundColor Yellow
-} else {
-  Write-Host "Build gagal: dist\AIClyveIDELite.exe tidak ada. Cek error di atas." -ForegroundColor Red
+$appDir = "dist\AIClyveIDELite"
+if (-not (Test-Path "$appDir\AIClyveIDELite.exe")) {
+  Write-Host "Build gagal: $appDir\AIClyveIDELite.exe tidak ada. Cek error di atas." -ForegroundColor Red
   exit 1
+}
+
+$version = & $vpy -c "from clyve_ide.version import __version__; print(__version__)"
+Write-Host ""
+Write-Host "App  -> $appDir\AIClyveIDELite.exe (tanpa window console)" -ForegroundColor Green
+
+# Installer: cari ISCC (Inno Setup 6). Kalau tidak ada, app tetap bisa dipakai portable.
+$iscc = @(
+  "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+  "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if ($iscc) {
+  Write-Host "Membuat installer..." -ForegroundColor Cyan
+  & $iscc "/DAppVersion=$version" "installer\AIClyveIDELite.iss"
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Installer gagal. App portable tetap ada di $appDir" -ForegroundColor Red
+    exit 1
+  }
+  Write-Host "Installer -> dist\AIClyveIDELite-Setup-$version.exe" -ForegroundColor Green
+} else {
+  Write-Host "Inno Setup tidak terpasang - installer dilewati." -ForegroundColor Yellow
+  Write-Host "Install dulu: winget install JRSoftware.InnoSetup" -ForegroundColor Yellow
+  Write-Host "Lalu jalankan ulang script ini." -ForegroundColor Yellow
 }

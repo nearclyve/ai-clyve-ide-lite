@@ -10,9 +10,18 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
+# Build .exe windowed (tanpa console) membuat sys.stdout/stderr = None.
+# Tanpa shim ini, setiap print() melempar AttributeError dan app mati diam-diam.
+if sys.stdout is None or sys.stderr is None:
+    _null = open(os.devnull, "w", encoding="utf-8")
+    sys.stdout = sys.stdout or _null
+    sys.stderr = sys.stderr or _null
+
 from clyve_ide import config
+from clyve_ide.version import __version__
 
 
 def main() -> int:
@@ -29,6 +38,8 @@ def main() -> int:
     ap.add_argument("--key", "-k", help="Clyve API key (persisted)")
     ap.add_argument("--model", "-m")
     ap.add_argument("--base-url")
+    ap.add_argument("--version", action="version",
+                    version=f"%(prog)s {__version__}")
     args = ap.parse_args()
 
     cfg = config.load()
