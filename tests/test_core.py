@@ -241,6 +241,25 @@ class QueueTest(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(w.input.height(), w.input.MIN_H)
 
+    def test_busy_timer_mentions_elapsed(self):
+        w = self.w
+        w._t0 = time.time() - 2.0
+        w._first_delta_at = 0.0
+        w._tick_busy()
+        self.assertIn("berpikir", w.status.text())
+        w._first_delta_at = time.time() - 0.5
+        w._tick_busy()
+        self.assertIn("membalas", w.status.text())
+
+    def test_empty_done_shows_hint(self):
+        w = self.w
+        w._t0 = time.time()
+        w._had_delta = False
+        before = w.chat.lay.count()
+        w._on_event({"type": "done", "content": ""})
+        self.assertGreater(w.chat.lay.count(), before)
+        self.assertIn("selesai", w.status.text())
+
     def test_worker_batches_deltas(self):
         """Delta dari agent digabung sebelum dikirim ke UI (bukan 1 signal/token)."""
         from clyve_ide.qt_app import AgentWorker

@@ -10,6 +10,7 @@ import html
 import json
 import platform
 import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -555,6 +556,15 @@ class MainWindow(QMainWindow):
         self._flush_timer.setInterval(70)
         self._flush_timer.timeout.connect(self._flush_stream)
 
+        # Timer status: user bisa lihat apakah yang lama itu jaringan/model
+        # ("berpikir 12.4s") atau app-nya ("membalas 2.1s").
+        self._t0 = 0.0
+        self._first_delta_at = 0.0
+        self._had_delta = False
+        self._busy_timer = QTimer(self)
+        self._busy_timer.setInterval(250)
+        self._busy_timer.timeout.connect(self._tick_busy)
+
         self.setWindowTitle(cfg.get("app_name") or "AI Clyve IDE Lite")
         self.resize(1280, 860)
         self._build()
@@ -598,7 +608,9 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+J"), self, self._toggle_terminal)
         QShortcut(QKeySequence("Ctrl+K"), self, lambda: self.search.setFocus())
         QTimer.singleShot(250, self.changes.refresh)
-        QTimer.singleShot(1200, lambda: self._check_update(silent=True))
+        # cek update otomatis hanya untuk build terpasang (.exe), bukan `python app.py`
+        if getattr(sys, "frozen", False):
+            QTimer.singleShot(1500, lambda: self._check_update(silent=True))
 
     # ---------------------------------------------------------- build: sidebar
     def _build_sidebar(self) -> QFrame:
@@ -1167,6 +1179,16 @@ class MainWindow(QMainWindow):
     def _scroll(self):
         self.chat.scroll_bottom()
 
+    def _tick_busy(self) -> None:
+        if not self._t0:
+            return
+        elapsed = time.time() - self._t0
+        if self._first_delta_at:
+            waited = self._first_delta_at - self._t0
+            self._set_status(f"membalas {elapsed:.1f}s (tunggu awal {waited:.1f}s)", WARN)
+        else:
+            self._set_status(f"berpikir {elapsed:.1f}s", WARN)
+
     def _set_status(self, text: str, color: str = MUTED):
         self.status.setText(text)
         self.status.setStyleSheet(f"color:{color};font-size:11.5px;")
@@ -1273,7 +1295,11 @@ class MainWindow(QMainWindow):
         self.busy = True
         self.stop_btn.setVisible(True)
         self.send_btn.setToolTip("Kirim (Enter) - pesan berikutnya masuk antrian")
-        self._set_status("berpikir...", WARN)
+        self._t0 = time.time()
+        self._first_delta_at = 0.0
+        self._had_delta = False
+        self._busy_timer.start()
+        self._set_status("berpikir 0.0s", WARN)
         self._activity = None
         self._flush_timer.stop()
         self._buf = []
@@ -1289,6 +1315,7 @@ class MainWindow(QMainWindow):
     def _stop(self):
         if self.session:
             self.session.cancel.set()
+        self._busy_timer.stop()
         if self.queue:
             self.queue.clear()
             self._render_queue()
@@ -1304,6 +1331,9 @@ class MainWindow(QMainWindow):
             if not chunk:
                 return
             self._buf.append(chunk)
+            if not self._had_delta:
+                self._had_delta = True
+                self._first_delta_at = time.time()
             if not self._stream_started:
                 self._stream_bubble = self.chat.add_bubble("bot")
                 self._stream_started = True
@@ -1323,12 +1353,24 @@ class MainWindow(QMainWindow):
         elif t == "done":
             if getattr(self, "_activity", None) is not None:
                 self._activity.finish()
-            self._finalize_stream(ev.get("content") or "")
-            self._set_status("siap")
+            text = ev.get("content") or ""
+            self._finalize_stream(text)
+            elapsed = (time.time() - self._t0) if self._t0 else 0.0
+            steps = ev.get("steps")
+            tail = f" \u00b7 {steps} langkah" if steps else ""
+            self._set_status(f"selesai {elapsed:.1f}s{tail}", OK)
+            if not text.strip() and not self._had_delta:
+                # contoh nyata: clyve-free membalas [DONE] tanpa konten sama sekali
+                self._append_bot_html(
+                    f"<span style='color:{WARN}'>Model <b>{html.escape(self.session.model)}</b> "
+                    "selesai tanpa mengirim teks. Coba model lain "
+                    "(mis. <code>deepseek-v4.1-flash</code>) atau kirim ulang pesan.</span>")
         elif t == "error":
             self._finalize_stream("")
             self._append_bot_html(f"<span style='color:{ERR}'>{html.escape(str(ev.get('message')))}</span>")
-            self._set_status("error", ERR)
+            self._busy_timer.stop()
+            elapsed = (time.time() - self._t0) if self._t0 else 0.0
+            self._set_status(f"error setelah {elapsed:.1f}s", ERR)
 
     def _flush_stream(self) -> None:
         """Render isi buffer ke bubble streaming (dipanggil timer, bukan per token)."""
@@ -1360,6 +1402,7 @@ class MainWindow(QMainWindow):
 
     def _on_finished(self):
         self.busy = False
+        self._busy_timer.stop()
         self.send_btn.setEnabled(True)
         self.stop_btn.setVisible(False)
         self._stream_started = False

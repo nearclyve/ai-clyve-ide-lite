@@ -93,6 +93,8 @@ Windows: `build_exe.ps1` (butuh Python 3.10+; installer butuh Inno Setup 6:
 - **Panel Changes** — status git + diff per file dengan nomor baris, commit message langsung
   dari app (`git add -A` + `git commit`). Tombol di topbar atau `Ctrl+Shift+G`.
 - **Terminal interaktif** — panel bawah dengan shell hidup (cwd ikut workspace), `Ctrl+J`.
+- **Status real-time** — topbar menampilkan `berpikir 3.2s` / `membalas 8.1s (tunggu awal 1.2s)`
+  / `selesai 9.4s · 3 langkah`, jadi kelihatan apakah lambatnya di model atau di app.
 - **API key milik user sendiri (BYOK)** — dibuka pertama kali, wajib isi key dari akun `ai.clyve.id`.
   Key disimpan lokal di `%APPDATA%\clyve-ide\settings.json`, tidak pernah dikirim ke mana pun selain gateway Clyve.
 - **Workspace picker** — pilih folder kerja lewat dialog; semua akses file dibatasi di folder itu.

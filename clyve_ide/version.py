@@ -6,7 +6,7 @@ CI (nama installer + tag rilis). Jangan hardcode versi di tempat lain.
 
 from __future__ import annotations
 
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 
 APP_ID = "AIClyveIDELite"
 REPO = "nearclyve/ai-clyve-ide-lite"
