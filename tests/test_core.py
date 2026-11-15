@@ -40,6 +40,20 @@ class VersionTest(unittest.TestCase):
         self.assertTrue(all(p.isdigit() for p in parts))
 
 
+class ProcTest(unittest.TestCase):
+    def test_no_window_kwargs_linux(self):
+        from clyve_ide import proc
+        old = proc.IS_WINDOWS
+        try:
+            proc.IS_WINDOWS = False
+            self.assertEqual(proc.no_window_kwargs(), {})
+            proc.IS_WINDOWS = True
+            kw = proc.no_window_kwargs()
+            self.assertEqual(kw["creationflags"], 0x08000000)
+        finally:
+            proc.IS_WINDOWS = old
+
+
 class UpdaterTest(unittest.TestCase):
     def test_pick_setup_asset(self):
         rel = {"assets": [
@@ -180,6 +194,37 @@ class QueueTest(unittest.TestCase):
 
     def test_send_button_has_text(self):
         self.assertEqual(self.w.send_btn.text(), "\u2191")
+
+    def test_input_autogrow(self):
+        w = self.w
+        w.input.setFixedHeight(w.input.MIN_H)
+        w.input.setPlainText("\n".join(f"baris {i}" for i in range(8)))
+        self.app.processEvents()
+        self.assertGreater(w.input.height(), w.input.MIN_H)
+        self.assertLessEqual(w.input.height(), w.input.MAX_H)
+        w.input.clear()
+        self.app.processEvents()
+        self.assertEqual(w.input.height(), w.input.MIN_H)
+
+    def test_worker_batches_deltas(self):
+        """Delta dari agent digabung sebelum dikirim ke UI (bukan 1 signal/token)."""
+        from clyve_ide.qt_app import AgentWorker
+
+        class FakeSession:
+            def run(self, text, atts):
+                for ch in "abcdefghij" * 4:
+                    yield 'data: {"type": "delta", "text": "%s"}' % ch
+                yield 'data: {"type": "done", "content": "ok"}'
+
+        worker = AgentWorker(FakeSession(), "x", [])
+        events = []
+        worker.event.connect(events.append)
+        worker.run()
+        self.app.processEvents()
+        deltas = [e["text"] for e in events if e.get("type") == "delta"]
+        self.assertEqual("".join(deltas), "abcdefghij" * 4)
+        self.assertLess(len(deltas), 40)
+        self.assertEqual(events[-1]["type"], "done")
 
 
 if __name__ == "__main__":

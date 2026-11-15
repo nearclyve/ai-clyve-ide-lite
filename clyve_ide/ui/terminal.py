@@ -117,6 +117,15 @@ class TerminalPanel(QFrame):
         self.proc.setProcessEnvironment(env)
         self.proc.setProgram(prog)
         self.proc.setArguments(args)
+        if platform.system() == "Windows":
+            # Tanpa CREATE_NO_WINDOW, shell console bisa memunculkan jendela
+            # hitam sendiri walau app-nya windowed.
+            def _no_console(proc_args):
+                proc_args.flags |= 0x08000000  # CREATE_NO_WINDOW
+            try:
+                self.proc.setCreateProcessArgumentsModifier(_no_console)
+            except Exception:  # noqa: BLE001
+                pass
         self.proc.readyReadStandardOutput.connect(self._read)
         self.proc.readyReadStandardError.connect(self._read)
         self.proc.finished.connect(self._finished)

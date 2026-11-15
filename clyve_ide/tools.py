@@ -15,6 +15,8 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+from .proc import no_window_kwargs
+
 IS_WINDOWS = platform.system() == "Windows"
 OUTPUT_LIMIT = 8000
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".idea", ".vscode"}
@@ -160,8 +162,11 @@ class Tools:
         workdir = self._safe(cwd) if cwd else self.ws
         self.log("shell", cmd)
         try:
+            # CREATE_NO_WINDOW: tanpa ini tiap perintah memunculkan window cmd
+            # hitam sekejap di Windows (flicker + lag saat agent kerja).
             proc = subprocess.run(cmd, shell=True, cwd=str(workdir), capture_output=True,
-                                  text=True, timeout=int(timeout), errors="replace")
+                                  text=True, timeout=int(timeout), errors="replace",
+                                  **no_window_kwargs())
         except subprocess.TimeoutExpired:
             return f"ERROR: command timed out after {timeout}s"
         except Exception as e:  # noqa: BLE001

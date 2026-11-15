@@ -89,9 +89,39 @@ def fmt_size(n: int) -> str:
 
 # --------------------------------------------------------------------- worker
 class ChatInput(QPlainTextEdit):
-    """Input chat yang menerima paste gambar (Ctrl+V) langsung sebagai lampiran."""
+    """Input chat: paste gambar (Ctrl+V) + tinggi ikut isi (auto-grow)."""
 
     image_pasted = Signal(object)
+    MIN_H = 46
+    MAX_H = 190
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.textChanged.connect(self._auto_grow)
+
+    def _auto_grow(self) -> None:
+        """Kotak input tumbuh mengikuti baris teks (termasuk wrap), maks MAX_H.
+
+        QTextDocument.size() mengembalikan jumlah blok, bukan piksel, jadi tinggi
+        dihitung dari font metrics per baris + wrap sesuai lebar viewport.
+        """
+        fm = self.fontMetrics()
+        width = max(120, self.viewport().width() - 4)
+        total = 0
+        block = self.document().begin()
+        while block.isValid():
+            rect = fm.boundingRect(0, 0, width, 10000, int(Qt.TextWordWrap), block.text())
+            total += max(fm.lineSpacing(), rect.height())
+            if total > self.MAX_H:
+                total = self.MAX_H
+                break
+            block = block.next()
+        h = max(self.MIN_H, min(self.MAX_H, total + 16))
+        if abs(h - self.height()) > 1:
+            self.setFixedHeight(h)
+
+    def reset_height(self) -> None:
+        self.setFixedHeight(self.MIN_H)
 
     def keyPressEvent(self, ev):  # noqa: N802
         if ev.matches(QKeySequence.Paste):
@@ -119,7 +149,11 @@ class AgentWorker(QThread):
         self.session, self.text, self.atts = session, text, atts
 
     def run(self):
+        # Delta digabung dulu (~16x/detik) sebelum menyeberang ke UI thread.
+        # Satu signal per token membuat event loop Qt banjir saat jawaban panjang.
         try:
+            pending = ""
+            last = time.time()
             for raw in self.session.run(self.text, self.atts):
                 payload = raw
                 if isinstance(raw, str):
@@ -128,8 +162,23 @@ class AgentWorker(QThread):
                         payload = json.loads(body)
                     except json.JSONDecodeError:
                         continue
-                if isinstance(payload, dict):
-                    self.event.emit(payload)
+                if not isinstance(payload, dict):
+                    continue
+                if payload.get("type") == "delta":
+                    pending += payload.get("text") or ""
+                    now = time.time()
+                    if pending and now - last >= 0.06:
+                        self.event.emit({"type": "delta", "text": pending})
+                        pending = ""
+                        last = now
+                    continue
+                if pending:
+                    self.event.emit({"type": "delta", "text": pending})
+                    pending = ""
+                    last = time.time()
+                self.event.emit(payload)
+            if pending:
+                self.event.emit({"type": "delta", "text": pending})
         except Exception as e:  # noqa: BLE001
             self.event.emit({"type": "error", "message": f"{type(e).__name__}: {e}"})
 
@@ -477,8 +526,6 @@ class ChatView(QScrollArea):
         """Scroll ke bawah, kecuali user sedang membaca pesan lama."""
         if not force and not self._at_bottom():
             return
-        self.lay.activate()
-        self.inner.adjustSize()
         bar = self.verticalScrollBar()
         bar.setValue(bar.maximum())
         # satu putaran event lagi: tinggi konten baru final setelah layout
@@ -499,6 +546,14 @@ class MainWindow(QMainWindow):
         self.current_chat = ""
         self.bridge = ApprovalBridge(self)
         self.session.approval = self.bridge.request
+
+        # Streaming di-throttle: render maksimal ~14x/detik. Dulu tiap token
+        # memanggil setText + relayout bubble, dan itu yang membuat PC lag saat
+        # agent membalas panjang.
+        self._flush_timer = QTimer(self)
+        self._flush_timer.setSingleShot(True)
+        self._flush_timer.setInterval(70)
+        self._flush_timer.timeout.connect(self._flush_stream)
 
         self.setWindowTitle(cfg.get("app_name") or "AI Clyve IDE Lite")
         self.resize(1280, 860)
@@ -1168,6 +1223,7 @@ class MainWindow(QMainWindow):
         if not text and not atts:
             return
         self.input.clear()
+        self.input.reset_height()
         self.attachments = []
         self._render_atts()
         if self.busy:
@@ -1219,6 +1275,7 @@ class MainWindow(QMainWindow):
         self.send_btn.setToolTip("Kirim (Enter) - pesan berikutnya masuk antrian")
         self._set_status("berpikir...", WARN)
         self._activity = None
+        self._flush_timer.stop()
         self._buf = []
         self._tools: dict[str, dict] = {}
         self._stream_started = False
@@ -1244,16 +1301,14 @@ class MainWindow(QMainWindow):
         t = ev.get("type")
         if t == "delta":
             chunk = ev.get("text") or ""
+            if not chunk:
+                return
             self._buf.append(chunk)
             if not self._stream_started:
                 self._stream_bubble = self.chat.add_bubble("bot")
                 self._stream_started = True
-            bubble = getattr(self, "_stream_bubble", None)
-            if bubble is not None:
-                raw = "".join(self._buf)
-                bubble.body.setText(
-                    f"<div style='white-space:pre-wrap;'>{html.escape(raw)}</div>")
-                self.chat.scroll_bottom()
+            if not self._flush_timer.isActive():
+                self._flush_timer.start()
         elif t == "tool_start":
             name = ev.get("name", "?")
             self._activity_group().start_tool(
@@ -1275,8 +1330,20 @@ class MainWindow(QMainWindow):
             self._append_bot_html(f"<span style='color:{ERR}'>{html.escape(str(ev.get('message')))}</span>")
             self._set_status("error", ERR)
 
+    def _flush_stream(self) -> None:
+        """Render isi buffer ke bubble streaming (dipanggil timer, bukan per token)."""
+        bubble = getattr(self, "_stream_bubble", None)
+        if bubble is None:
+            return
+        raw = "".join(self._buf)
+        preview = raw if len(raw) <= 20000 else "...\n" + raw[-20000:]
+        bubble.body.setText(
+            f"<div style='white-space:pre-wrap;'>{html.escape(preview)}</div>")
+        self.chat.scroll_bottom()
+
     def _finalize_stream(self, fallback: str):
         """Ganti teks streaming dengan markdown yang sudah dirender."""
+        self._flush_timer.stop()
         text = "".join(getattr(self, "_buf", [])) or fallback
         bubble = getattr(self, "_stream_bubble", None)
         if not text.strip():
@@ -1303,7 +1370,7 @@ class MainWindow(QMainWindow):
             pass
         self._refresh_history()
         self._scroll()
-        if getattr(self, "changes", None) is not None:
+        if getattr(self, "changes", None) is not None and self.changes.isVisible():
             self.changes.refresh()
         if self.queue:
             nxt = self.queue.pop(0)

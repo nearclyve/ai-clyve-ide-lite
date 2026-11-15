@@ -10,13 +10,16 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from .proc import no_window_kwargs
+
 MAX_DIFF_CHARS = 200_000
 
 
 def _git(root: str | Path, *args: str, timeout: int = 20) -> tuple[int, str, str]:
     try:
         p = subprocess.run(["git", *args], cwd=str(root), capture_output=True,
-                           text=True, timeout=timeout, errors="replace")
+                           text=True, timeout=timeout, errors="replace",
+                           **no_window_kwargs())
         return p.returncode, p.stdout or "", p.stderr or ""
     except FileNotFoundError:
         return 127, "", "git tidak terpasang"
