@@ -1391,16 +1391,31 @@ class MainWindow(QMainWindow):
     def _check_update(self, silent: bool = True) -> None:
         if isinstance(getattr(self, "_upd", None), UpdateCheckWorker) and self._upd.isRunning():
             return
+        self._upd_manual = not silent
         self._upd = UpdateCheckWorker(self)
-        self._upd.found.connect(self._on_update_found)
+        self._upd.checked.connect(self._on_update_checked)
         if not silent:
             self._set_status("cek update...", WARN)
-            self._upd.finished_ok.connect(self._on_update_checked)
         self._upd.start()
 
-    def _on_update_checked(self, found: bool) -> None:
-        if not found:
-            self._set_status(f"v{__version__} terbaru", OK)
+    def _on_update_checked(self, info: dict, error: str) -> None:
+        if info:
+            self._on_update_found(info)
+            return
+        if error:
+            self._set_status(f"cek update gagal: {error[:48]}", ERR)
+            if getattr(self, "_upd_manual", False):
+                QMessageBox.warning(
+                    self, "Cek update",
+                    "Tidak bisa memeriksa update.\n\n" + error +
+                    "\n\nKalau repo masih private, API GitHub membalas 404 untuk "
+                    "pengguna anonim. Isi `update_url` di brand.json ke latest.json "
+                    "publik, atau buka akses repo.")
+            return
+        self._set_status(f"v{__version__} terbaru", OK)
+        if getattr(self, "_upd_manual", False):
+            QMessageBox.information(self, "Cek update",
+                                    f"Versi {__version__} sudah yang terbaru.")
 
     def _on_update_found(self, info: dict) -> None:
         dlg = UpdateDialog(info, self)
@@ -1416,18 +1431,17 @@ class MainWindow(QMainWindow):
 
 # --------------------------------------------------------------- update app
 class UpdateCheckWorker(QThread):
-    found = Signal(dict)
-    finished_ok = Signal(bool)
+    """Cek rilis di thread sendiri; hasilnya (info, error) — error harus terlihat."""
+
+    checked = Signal(dict, str)
 
     def run(self):
         try:
             from . import updater
-            info = updater.check()
-        except Exception:  # noqa: BLE001
-            info = None
-        if info:
-            self.found.emit(info)
-        self.finished_ok.emit(bool(info))
+            info, err = updater.check_detailed()
+        except Exception as e:  # noqa: BLE001
+            info, err = None, f"{type(e).__name__}: {e}"
+        self.checked.emit(info or {}, err or "")
 
 
 class UpdateDownloadWorker(QThread):

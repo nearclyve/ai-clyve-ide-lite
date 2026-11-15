@@ -4,5 +4,6 @@
   "lock_base_url": true,
   "lock_model": false,
   "default_model": "ai-clyve-1",
-  "models": []
+  "models": [],
+  "update_url": ""
 }

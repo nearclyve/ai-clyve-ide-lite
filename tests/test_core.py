@@ -70,6 +70,41 @@ class UpdaterTest(unittest.TestCase):
         self.assertIsNone(updater.pick_asset({"assets": [{"name": "a.zip"}]}))
         self.assertIsNone(updater.pick_asset({}))
 
+    def test_manifest_flow(self):
+        old_url, old_get, old_status = (updater.manifest_url, updater._get_json,
+                                        updater._http_status)
+        try:
+            updater.manifest_url = lambda: "http://x/latest.json"
+            updater._get_json = lambda url, timeout=12: {
+                "version": "9.9.9", "url": "http://x/Setup.exe", "notes": "n"}
+            info, err = updater.check_detailed()
+            self.assertEqual(err, "")
+            self.assertEqual(info["version"], "9.9.9")
+            self.assertEqual(info["source"], "manifest")
+
+            updater._get_json = lambda url, timeout=12: None
+            info, err = updater.check_detailed()
+            self.assertIsNone(info)
+            self.assertIn("manifest", err)
+        finally:
+            updater.manifest_url, updater._get_json, updater._http_status = (
+                old_url, old_get, old_status)
+
+    def test_private_repo_404_reports_error(self):
+        old_url, old_get, old_status = (updater.manifest_url, updater._get_json,
+                                        updater._http_status)
+        try:
+            updater.manifest_url = lambda: ""
+            updater._get_json = lambda url, timeout=12: None
+            updater._http_status = lambda url, timeout=12: "HTTP 404"
+            info, err = updater.check_detailed()
+            self.assertIsNone(info)
+            self.assertIn("HTTP 404", err)
+            self.assertIn("private", err)
+        finally:
+            updater.manifest_url, updater._get_json, updater._http_status = (
+                old_url, old_get, old_status)
+
     def test_check_bad_network_is_none(self):
         # endpoint tidak valid -> None, bukan exception
         old = updater.API_LATEST

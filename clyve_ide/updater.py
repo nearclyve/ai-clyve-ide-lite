@@ -12,6 +12,7 @@ Tidak ada I/O jaringan saat modul di-import: semua fungsi dipanggil eksplisit.
 from __future__ import annotations
 
 import json
+import os
 import platform
 import subprocess
 import tempfile
@@ -48,17 +49,82 @@ def pick_asset(release: dict) -> dict | None:
     return exes[0] if exes else None
 
 
-def check(timeout: int = 12) -> dict | None:
-    """Return dict info update kalau ada versi lebih baru, else None."""
+def manifest_url() -> str:
+    """URL latest.json alternatif (brand.json `update_url` atau env CLYVE_UPDATE_URL).
+
+    Dipakai kalau source repo private: rilis + installer bisa ditaruh di host
+    statis publik tanpa membuka source code.
+    """
+    env = os.environ.get("CLYVE_UPDATE_URL", "").strip()
+    if env:
+        return env
+    try:
+        from . import config
+        brand = config.load_brand()
+        return str(brand.get("update_url") or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _check_manifest(url: str, timeout: int) -> tuple[dict | None, str]:
+    data = _get_json(url, timeout=timeout)
+    if not data:
+        return None, f"manifest tidak bisa dibaca: {url}"
+    latest = str(data.get("version") or "")
+    if not latest or not is_newer(latest, __version__):
+        return None, ""
+    if not data.get("url"):
+        return None, "manifest tidak punya field url"
+    return {
+        "version": latest.lstrip("vV"),
+        "tag": latest if latest.lower().startswith("v") else f"v{latest}",
+        "url": data["url"],
+        "name": data.get("name") or f"{APP_ID}-Setup-{latest}.exe",
+        "notes": (data.get("notes") or "").strip()[:1500],
+        "published": data.get("published") or "",
+        "size": int(data.get("size") or 0),
+        "source": "manifest",
+    }, ""
+
+
+def _http_status(url: str, timeout: int = 12) -> str:
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
+                                               "User-Agent": UA})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return f"HTTP {r.status}"
+    except urllib.error.HTTPError as e:
+        return f"HTTP {e.code}"
+    except Exception as e:  # noqa: BLE001
+        return f"{type(e).__name__}"
+
+
+def check_detailed(timeout: int = 12) -> tuple[dict | None, str]:
+    """(info_update | None, pesan_error). Error kosong berarti cek berhasil.
+
+    Alasan error perlu ditampilkan: repo private membuat API GitHub membalas
+    404, dan tanpa pesan ini app terlihat "tidak ada update" padahal updater
+    tidak pernah bisa melihat rilis.
+    """
+    url = manifest_url()
+    if url:
+        info, err = _check_manifest(url, timeout)
+        if info or err:
+            return info, err
+
     rel = _get_json(API_LATEST, timeout=timeout)
     if not rel:
-        return None
+        status = _http_status(API_LATEST, timeout=timeout)
+        hint = "repo private / rilis belum ada" if status in ("HTTP 404", "HTTP 403") else status
+        return None, f"GitHub API {status} ({hint})"
     tag = str(rel.get("tag_name") or "")
-    if not tag or not is_newer(tag, __version__):
-        return None
+    if not tag:
+        return None, "respons GitHub tanpa tag_name"
+    if not is_newer(tag, __version__):
+        return None, ""
     asset = pick_asset(rel)
     if not asset:
-        return None
+        return None, f"rilis {tag} tidak punya asset .exe (installer belum ter-upload)"
     return {
         "version": tag.lstrip("vV"),
         "tag": tag,
@@ -67,7 +133,13 @@ def check(timeout: int = 12) -> dict | None:
         "notes": (rel.get("body") or "").strip()[:1500],
         "published": rel.get("published_at") or "",
         "size": int(asset.get("size") or 0),
-    }
+        "source": "github",
+    }, ""
+
+
+def check(timeout: int = 12) -> dict | None:
+    """Return info update kalau ada versi lebih baru, else None."""
+    return check_detailed(timeout=timeout)[0]
 
 
 def download(url: str, progress=None, timeout: int = 180) -> Path:

@@ -196,9 +196,23 @@ kalau build manual). Contoh ada di `brand.example.json`:
   "base_url": "https://ai.clyve.id/v1",
   "lock_base_url": true,
   "lock_model": false,
-  "models": []
+  "models": [],
+  "update_url": ""
 }
 ```
+
+`update_url` (opsional): URL `latest.json` publik untuk auto-update kalau source repo
+private. Contoh isi:
+
+```json
+{"version": "1.2.0", "url": "https://contoh.id/AIClyveIDELite-Setup-1.2.0.exe",
+ "notes": "catatan rilis", "size": 90000000}
+```
+
+Kalau `update_url` kosong, updater memakai GitHub Releases API — dan API itu
+membalas **404 untuk pengguna anonim kalau repo private**, jadi auto-update
+tidak akan pernah terdeteksi. Pilih salah satu: repo publik, atau host
+`latest.json` + installer di URL publik.
 
 Efeknya:
 
