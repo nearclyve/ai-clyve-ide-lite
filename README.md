@@ -51,6 +51,15 @@ CI (`.github/workflows/build-windows-exe.yml`) menghasilkan:
 Updater mengambil **release terbaru non-draft** dari `api.github.com`, jadi
 setelah tag di-push tidak ada langkah manual lain.
 
+## Test
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Bagian Qt otomatis di-skip kalau PySide6 tidak terpasang. CI menjalankan test
+yang sama sebelum build Windows.
+
 ## Build manual
 
 Windows: `build_exe.ps1` (butuh Python 3.10+; installer butuh Inno Setup 6:
@@ -69,7 +78,13 @@ Windows: `build_exe.ps1` (butuh Python 3.10+; installer butuh Inno Setup 6:
   `×` untuk hapus, `+` untuk percakapan baru. Riwayat ikut tersimpan saat app ditutup.
 - **Stop yang benar-benar berhenti** — tombol Stop memutus request ke gateway (bukan cuma
   berhenti menampilkan), chat langsung bisa dipakai lagi tanpa reload.
-- **Chat UI** — stream jawaban token per token, kartu tool call bisa diklik untuk lihat output mentah.
+- **Chat UI** — stream jawaban token per token; langkah agent dikelompokkan dalam blok
+  `Working · N` (satu baris per tool: ikon, argumen, durasi, output mentah bisa dibuka).
+- **Antrian pesan** — kirim pesan saat agent masih membalas, pesan masuk antrian
+  (chip di atas input, klik `×` untuk batal) dan terkirim otomatis begitu giliran selesai.
+- **Panel Changes** — status git + diff per file dengan nomor baris, commit message langsung
+  dari app (`git add -A` + `git commit`). Tombol di topbar atau `Ctrl+Shift+G`.
+- **Terminal interaktif** — panel bawah dengan shell hidup (cwd ikut workspace), `Ctrl+J`.
 - **API key milik user sendiri (BYOK)** — dibuka pertama kali, wajib isi key dari akun `ai.clyve.id`.
   Key disimpan lokal di `%APPDATA%\clyve-ide\settings.json`, tidak pernah dikirim ke mana pun selain gateway Clyve.
 - **Workspace picker** — pilih folder kerja lewat dialog; semua akses file dibatasi di folder itu.
@@ -293,6 +308,7 @@ clyve_ide/
   version.py        # satu sumber versi (dipakai app, updater, CI)
   server.py         # HTTP server + REST + SSE (UI web)
   desktop.py        # jendela web: pywebview -> --app -> browser
+tests/              # unittest inti (version, updater, gitutil, antrian chat)
 installer/          # script Inno Setup
 scripts/            # generator version resource Windows
 web/

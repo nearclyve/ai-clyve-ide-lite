@@ -47,6 +47,11 @@ jobs:
       - name: Smoke import
         run: python -c "import clyve_ide.agent, clyve_ide.qt_app, clyve_ide.updater, clyve_ide.gitutil; print('import ok')"
 
+      - name: Unit test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -v
+
       - name: Siapkan brand.json
         shell: pwsh
         run: if (-not (Test-Path brand.json)) { Copy-Item brand.example.json brand.json }

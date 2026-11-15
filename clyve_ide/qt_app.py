@@ -493,6 +493,7 @@ class MainWindow(QMainWindow):
                                     cfg["workspace"], extra_roots=cfg.get("extra_roots") or [],
                                     full_access=bool(cfg.get("full_access")))
         self.attachments: list[dict] = []
+        self.queue: list[dict] = []
         self.worker: AgentWorker | None = None
         self.busy = False
         self.current_chat = ""
@@ -753,6 +754,14 @@ class MainWindow(QMainWindow):
         vl.setContentsMargins(16, 0, 16, 10)
         vl.setSpacing(6)
 
+        self.queue_row = QHBoxLayout()
+        self.queue_row.setContentsMargins(0, 0, 0, 0)
+        self.queue_row.setSpacing(6)
+        self.queue_row.addStretch(1)
+        queue_holder = QWidget()
+        queue_holder.setLayout(self.queue_row)
+        vl.addWidget(queue_holder)
+
         self.att_row = QHBoxLayout()
         self.att_row.setContentsMargins(0, 0, 0, 0)
         self.att_row.setSpacing(6)
@@ -785,7 +794,7 @@ class MainWindow(QMainWindow):
         self.input = ChatInput()
         self.input.setObjectName("input")
         self.input.image_pasted.connect(self._paste_image)
-        self.input.setPlaceholderText("Tulis instruksi... (Enter kirim, Shift+Enter baris baru)")
+        self.input.setPlaceholderText("Tulis instruksi...")
         self.input.setFixedHeight(46)
         self.input.setStyleSheet(
             f"QPlainTextEdit#input{{background:transparent;border:none;padding:4px 2px;"
@@ -793,14 +802,19 @@ class MainWindow(QMainWindow):
         self.input.installEventFilter(self)
         r1.addWidget(self.input, 1)
 
-        self.send_btn = QPushButton("↑")
+        self.send_btn = QPushButton("\u2191")
         self.send_btn.setObjectName("primary")
-        self.send_btn.setFixedSize(30, 30)
+        self.send_btn.setFixedSize(32, 30)
+        self.send_btn.setCursor(Qt.PointingHandCursor)
+        self.send_btn.setToolTip("Kirim (Enter). Saat agent masih membalas, pesan masuk antrian.")
+        # padding 0 penting: QPushButton global punya padding 6px 11px, bikin glyph
+        # "↑" terpotong sampai tombol terlihat kosong.
         self.send_btn.setStyleSheet(
             f"QPushButton{{background:{theme.ACCENT_DARK};border:none;border-radius:8px;"
-            f"color:white;font-size:15px;font-weight:700;}}"
+            f"color:white;font-size:16px;font-weight:700;padding:0;min-height:0;"
+            f"min-width:0;}}"
             f"QPushButton:hover{{background:{theme.ACCENT};}}"
-            f"QPushButton:disabled{{background:{theme.PANEL2};color:{theme.DIM};}}")
+            f"QPushButton:pressed{{background:#6d28d9;}}")
         self.send_btn.clicked.connect(self._send)
         r1.addWidget(self.send_btn, 0, Qt.AlignBottom)
         fl.addLayout(r1)
@@ -893,6 +907,12 @@ class MainWindow(QMainWindow):
         if idx >= 0:
             self.model_box.setCurrentIndex(idx)
         self.model_box.blockSignals(False)
+        self._refresh_history()
+
+    def _refresh_history(self) -> None:
+        """Isi daftar thread dari disk. Tanpa network: dipanggil tiap giliran selesai."""
+        if getattr(self, "history", None) is None:
+            return
         self.history.clear()
         for c in list_chats():
             raw = (c["title"] or "(baru)").strip().replace("\n", " ")
@@ -1049,6 +1069,26 @@ class MainWindow(QMainWindow):
         lay.addWidget(title)
         lay.addWidget(sub)
         lay.addWidget(hint)
+
+        chips = QHBoxLayout()
+        chips.setSpacing(6)
+        chips.addStretch(1)
+        for label, prompt in (
+            ("Audit repo ini", "Audit repo ini: cari bug, jelaskan temuan, lalu usulkan perbaikan."),
+            ("Baca & ringkas", "Baca struktur repo ini dan ringkas arsitektur, entry point, serta risikonya."),
+            ("Setup fitur baru", "Bantu saya menambah fitur baru di repo ini. Tanya dulu kebutuhan detailnya."),
+        ):
+            b = QPushButton(label)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setStyleSheet(
+                f"QPushButton{{background:{theme.PANEL2};border:1px solid {theme.LINE};"
+                f"border-radius:14px;color:{theme.MUTED};font-size:11px;padding:5px 12px;}}"
+                f"QPushButton:hover{{color:{theme.FG};border-color:{theme.ACCENT};}}")
+            b.clicked.connect(lambda _=False, text=prompt: (self.input.setPlainText(text),
+                                                            self.input.setFocus()))
+            chips.addWidget(b)
+        chips.addStretch(1)
+        lay.addLayout(chips)
         self.chat.add_widget(box)
 
     # ------------------------------------------------------------------ chat ui
@@ -1122,26 +1162,61 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ send
     def _send(self):
-        if self.busy:
-            return
+        """Kirim sekarang, atau masuk antrian kalau agent masih membalas."""
         text = self.input.toPlainText().strip()
         atts = list(self.attachments)
         if not text and not atts:
             return
-        if getattr(self, "_welcome", False):
-            self.chat.clear()
-            self._welcome = False
         self.input.clear()
         self.attachments = []
         self._render_atts()
+        if self.busy:
+            self._enqueue(text, atts)
+            return
+        self._dispatch(text, atts)
+
+    def _enqueue(self, text: str, atts: list[dict]) -> None:
+        self.queue.append({"text": text, "atts": atts})
+        self._render_queue()
+        self._set_status(f"antrian {len(self.queue)} pesan - dikirim otomatis setelah balasan", WARN)
+
+    def _dequeue(self, idx: int) -> None:
+        if 0 <= idx < len(self.queue):
+            self.queue.pop(idx)
+            self._render_queue()
+            if not self.queue:
+                self._set_status("berpikir..." if self.busy else "siap", WARN if self.busy else MUTED)
+
+    def _render_queue(self) -> None:
+        while self.queue_row.count() > 1:
+            item = self.queue_row.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for i, q in enumerate(self.queue):
+            body = (q["text"] or "").strip().splitlines()
+            label = (body[0] if body else ("lampiran" if q["atts"] else "pesan"))[:30]
+            chip = QPushButton(f"\u23f3 {i + 1}. {label}   \u00d7")
+            chip.setToolTip("Masih dalam antrian - klik untuk membatalkan")
+            chip.setStyleSheet(
+                f"QPushButton{{background:{theme.PANEL2};border:1px solid {theme.LINE};"
+                f"border-radius:6px;color:{theme.MUTED};font-size:10.5px;padding:2px 8px;}}"
+                f"QPushButton:hover{{color:{theme.FG};border-color:#3d3357;}}")
+            chip.clicked.connect(lambda _=False, idx=i: self._dequeue(idx))
+            self.queue_row.insertWidget(self.queue_row.count() - 1, chip)
+
+    def _dispatch(self, text: str, atts: list[dict]) -> None:
+        """Mulai satu giliran agent. Dipanggil langsung atau dari antrian."""
+        if getattr(self, "_welcome", False):
+            self.chat.clear()
+            self._welcome = False
         if self.title_label.text() in ("", "New thread"):
             first = (text or (atts[0]["name"] if atts else "")).strip().splitlines()
             self.title_label.setText((first[0] if first else "Thread")[:60])
         self._append_user(text + ("\nLampiran: " + ", ".join(a["name"] for a in atts) if atts else ""))
         self.chat.scroll_bottom(force=True)
         self.busy = True
-        self.send_btn.setEnabled(False)
         self.stop_btn.setVisible(True)
+        self.send_btn.setToolTip("Kirim (Enter) - pesan berikutnya masuk antrian")
         self._set_status("berpikir...", WARN)
         self._activity = None
         self._buf = []
@@ -1157,7 +1232,12 @@ class MainWindow(QMainWindow):
     def _stop(self):
         if self.session:
             self.session.cancel.set()
-        self._set_status("dihentikan", WARN)
+        if self.queue:
+            self.queue.clear()
+            self._render_queue()
+            self._set_status("dihentikan - antrian dibatalkan", WARN)
+        else:
+            self._set_status("dihentikan", WARN)
         self.stop_btn.setVisible(False)
 
     def _on_event(self, ev: dict):
@@ -1221,10 +1301,17 @@ class MainWindow(QMainWindow):
             save_chat(self.current_chat, self.session.snapshot())
         except Exception:  # noqa: BLE001
             pass
-        self._refresh_models()
+        self._refresh_history()
         self._scroll()
         if getattr(self, "changes", None) is not None:
             self.changes.refresh()
+        if self.queue:
+            nxt = self.queue.pop(0)
+            self._render_queue()
+            self._set_status(f"melanjutkan antrian ({len(self.queue)} sisa)", WARN)
+            QTimer.singleShot(120, lambda q=nxt: self._dispatch(q["text"], q["atts"]))
+        else:
+            self.send_btn.setToolTip("Kirim (Enter). Saat agent masih membalas, pesan masuk antrian.")
 
     def closeEvent(self, ev):  # noqa: N802
         # shell QProcess harus dimatikan eksplisit, kalau tidak Qt membunuhnya
