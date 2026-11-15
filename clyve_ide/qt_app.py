@@ -561,6 +561,7 @@ class MainWindow(QMainWindow):
         self._t0 = 0.0
         self._first_delta_at = 0.0
         self._had_delta = False
+        self._reason_buf: list[str] = []
         self._busy_timer = QTimer(self)
         self._busy_timer.setInterval(250)
         self._busy_timer.timeout.connect(self._tick_busy)
@@ -1186,6 +1187,9 @@ class MainWindow(QMainWindow):
         if self._first_delta_at:
             waited = self._first_delta_at - self._t0
             self._set_status(f"membalas {elapsed:.1f}s (tunggu awal {waited:.1f}s)", WARN)
+        elif self._reason_buf:
+            n = sum(len(x) for x in self._reason_buf)
+            self._set_status(f"menalar {elapsed:.1f}s \u00b7 {n} karakter", WARN)
         else:
             self._set_status(f"berpikir {elapsed:.1f}s", WARN)
 
@@ -1302,6 +1306,7 @@ class MainWindow(QMainWindow):
         self._set_status("berpikir 0.0s", WARN)
         self._activity = None
         self._flush_timer.stop()
+        self._reason_buf = []
         self._buf = []
         self._tools: dict[str, dict] = {}
         self._stream_started = False
@@ -1326,6 +1331,17 @@ class MainWindow(QMainWindow):
 
     def _on_event(self, ev: dict):
         t = ev.get("type")
+        if t == "reasoning":
+            think = ev.get("text") or ""
+            if not think:
+                return
+            self._reason_buf.append(think)
+            if not self._stream_started:
+                self._stream_bubble = self.chat.add_bubble("bot")
+                self._stream_started = True
+            if not self._flush_timer.isActive():
+                self._flush_timer.start()
+            return
         if t == "delta":
             chunk = ev.get("text") or ""
             if not chunk:
@@ -1354,12 +1370,13 @@ class MainWindow(QMainWindow):
             if getattr(self, "_activity", None) is not None:
                 self._activity.finish()
             text = ev.get("content") or ""
+            had_bubble = getattr(self, "_stream_bubble", None) is not None
             self._finalize_stream(text)
             elapsed = (time.time() - self._t0) if self._t0 else 0.0
             steps = ev.get("steps")
             tail = f" \u00b7 {steps} langkah" if steps else ""
             self._set_status(f"selesai {elapsed:.1f}s{tail}", OK)
-            if not text.strip() and not self._had_delta:
+            if not text.strip() and not self._had_delta and not had_bubble:
                 # contoh nyata: clyve-free membalas [DONE] tanpa konten sama sekali
                 self._append_bot_html(
                     f"<span style='color:{WARN}'>Model <b>{html.escape(self.session.model)}</b> "
@@ -1378,9 +1395,18 @@ class MainWindow(QMainWindow):
         if bubble is None:
             return
         raw = "".join(self._buf)
-        preview = raw if len(raw) <= 20000 else "...\n" + raw[-20000:]
-        bubble.body.setText(
-            f"<div style='white-space:pre-wrap;'>{html.escape(preview)}</div>")
+        if raw.strip():
+            preview = raw if len(raw) <= 20000 else "...\n" + raw[-20000:]
+            bubble.body.setText(
+                f"<div style='white-space:pre-wrap;'>{html.escape(preview)}</div>")
+        else:
+            reason = "".join(self._reason_buf)
+            if not reason:
+                return
+            tail = reason[-600:]
+            bubble.body.setText(
+                f"<span style='color:{MUTED};font-style:italic;font-size:11.5px;'>"
+                f"menalar... {html.escape(tail)}</span>")
         self.chat.scroll_bottom()
 
     def _finalize_stream(self, fallback: str):
@@ -1389,8 +1415,20 @@ class MainWindow(QMainWindow):
         text = "".join(getattr(self, "_buf", [])) or fallback
         bubble = getattr(self, "_stream_bubble", None)
         if not text.strip():
+            reason = "".join(getattr(self, "_reason_buf", [])).strip()
+            if bubble is not None and reason:
+                # model reasoning yang berhenti tanpa jawaban akhir (mis. clyve-free)
+                tail = reason[-1200:]
+                bubble.body.setText(
+                    f"<span style='color:{WARN}'>Model <b>{html.escape(self.session.model)}</b> "
+                    "berhenti setelah menalar tanpa jawaban akhir. Coba kirim ulang "
+                    "atau ganti model.</span><br><br>"
+                    f"<span style='color:{MUTED};font-size:11px;font-style:italic;'>"
+                    f"{html.escape(tail)}</span>")
+                self._had_delta = True
             self._stream_started = False
             self._stream_bubble = None
+            self._reason_buf = []
             return
         if bubble is not None:
             bubble.body.setText(md_to_html(text))

@@ -35,7 +35,7 @@ Update tidak perlu download manual:
   berisi catatan rilis -> **Update sekarang** -> installer diunduh, app ditutup,
   update dipasang senyap, lalu app dibuka lagi.
 - Cek manual lewat tombol **Cek update** di topbar.
-- Nomor versi terpasang tampil di sidebar (`v1.1.0`).
+- Nomor versi terpasang tampil di sidebar.
 - Update tidak menghapus settings: API key + riwayat chat ada di
   `%APPDATA%\clyve-ide`, di luar folder instalasi.
 
@@ -93,6 +93,10 @@ Windows: `build_exe.ps1` (butuh Python 3.10+; installer butuh Inno Setup 6:
 - **Panel Changes** — status git + diff per file dengan nomor baris, commit message langsung
   dari app (`git add -A` + `git commit`). Tombol di topbar atau `Ctrl+Shift+G`.
 - **Terminal interaktif** — panel bawah dengan shell hidup (cwd ikut workspace), `Ctrl+J`.
+- **File tree workspace** — di panel kanan bawah kotak commit, semua folder terlipat
+  default, klik dua kali file untuk membukanya di aplikasi default OS.
+- **Lampiran gambar/PDF** — disimpan di folder config app (bukan di workspace), jadi tidak
+  mengotori git; file biner di panel Changes diberi badge `BIN` dan isinya tidak dirender.
 - **Status real-time** — topbar menampilkan `berpikir 3.2s` / `membalas 8.1s (tunggu awal 1.2s)`
   / `selesai 9.4s · 3 langkah`, jadi kelihatan apakah lambatnya di model atau di app.
 - **API key milik user sendiri (BYOK)** — dibuka pertama kali, wajib isi key dari akun `ai.clyve.id`.

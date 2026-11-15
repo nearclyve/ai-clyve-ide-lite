@@ -40,6 +40,26 @@ class VersionTest(unittest.TestCase):
         self.assertTrue(all(p.isdigit() for p in parts))
 
 
+class AttachmentsTest(unittest.TestCase):
+    def test_upload_stored_outside_workspace(self):
+        import os
+        import tempfile
+        from clyve_ide import attachments
+        ws = Path(tempfile.mkdtemp(prefix="clyve-ws-"))
+        old = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = tempfile.mkdtemp(prefix="clyve-cfg-")
+        try:
+            info = attachments.save_upload(ws, "catatan.txt", b"halo")
+            p = Path(info["path"])
+            self.assertTrue(p.is_file())
+            self.assertNotIn(str(ws), str(p))  # tidak mengotori workspace/git
+        finally:
+            if old is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = old
+
+
 class ProcTest(unittest.TestCase):
     def test_no_window_kwargs_linux(self):
         from clyve_ide import proc
@@ -154,6 +174,14 @@ class GitUtilTest(unittest.TestCase):
         self.assertEqual(gitutil.status(self.dir), [])
         self.assertIn("test: commit", self._git("log", "-1", "--pretty=%s").stdout)
 
+    def test_binary_file_not_rendered_as_diff(self):
+        (self.dir / "gambar.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+        self.assertTrue(gitutil.looks_binary(self.dir, "gambar.png"))
+        self.assertEqual(gitutil.diff(self.dir, "gambar.png"), "")
+        rows = {r["path"]: r for r in gitutil.files_with_diff(self.dir)}
+        self.assertTrue(rows["gambar.png"]["binary"])
+        self.assertFalse(gitutil.looks_binary(self.dir, "a.txt"))
+
     def test_commit_rejects_empty_message(self):
         ok, msg = gitutil.commit(self.dir, "   ")
         self.assertFalse(ok)
@@ -259,6 +287,34 @@ class QueueTest(unittest.TestCase):
         w._on_event({"type": "done", "content": ""})
         self.assertGreater(w.chat.lay.count(), before)
         self.assertIn("selesai", w.status.text())
+
+    def test_reasoning_shown_then_warns_when_no_answer(self):
+        w = self.w
+        w.chat.clear()
+        w._welcome = False
+        w._stream_started = False
+        w._stream_bubble = None
+        w._reason_buf = []
+        w._buf = []
+        w._t0 = time.time()
+        w._first_delta_at = 0.0
+        w._had_delta = False
+        w._on_event({"type": "reasoning", "text": "pertimbangkan dulu "})
+        w._on_event({"type": "reasoning", "text": "lalu simpulkan"})
+        w._tick_busy()
+        self.assertIn("menalar", w.status.text())
+        w._on_event({"type": "done", "content": ""})
+        all_text = " ".join(self._bubble_texts())
+        self.assertIn("tanpa jawaban akhir", all_text)
+
+    def _bubble_texts(self):
+        from PySide6.QtWidgets import QLabel
+        out = []
+        for lab in self.w.chat.inner.findChildren(QLabel):
+            t = lab.text() or ""
+            if t.strip():
+                out.append(t)
+        return out
 
     def test_worker_batches_deltas(self):
         """Delta dari agent digabung sebelum dikirim ke UI (bukan 1 signal/token)."""

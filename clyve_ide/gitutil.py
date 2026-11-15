@@ -68,6 +68,21 @@ def status(root: str | Path) -> list[dict]:
     return items
 
 
+def looks_binary(root: str | Path, path: str) -> bool:
+    """Deteksi file biner sederhana: NUL byte di 8 KB pertama.
+
+    Panel Changes tidak boleh merender isi PNG/zip sebagai diff teks — itu
+    menghasilkan ribuan baris sampah dan bikin UI berat.
+    """
+    try:
+        p = Path(root) / path
+        if not p.is_file():
+            return False
+        return b"\x00" in p.read_bytes()[:8192]
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _untracked_diff(root: Path, path: str) -> str:
     """File baru belum dilacak: git diff kosong, jadi tampilkan isinya sebagai tambahan."""
     try:
@@ -87,6 +102,8 @@ def diff(root: str | Path, path: str | None = None, staged: bool = False) -> str
     args = ["diff", "--no-color", "--no-ext-diff", "--unified=3"]
     if staged:
         args.append("--cached")
+    if path and looks_binary(rootp, path):
+        return ""
     if path:
         args += ["--", path]
     rc, out, _ = _git(rootp, *args)
@@ -104,6 +121,7 @@ def files_with_diff(root: str | Path) -> list[dict]:
     rootp = Path(root)
     rows = status(rootp)
     for row in rows:
+        row["binary"] = looks_binary(rootp, row["path"])
         d = diff(rootp, row["path"], staged=row["staged"])
         row["added"] = sum(1 for ln in d.splitlines() if ln.startswith("+") and not ln.startswith("+++"))
         row["removed"] = sum(1 for ln in d.splitlines() if ln.startswith("-") and not ln.startswith("---"))

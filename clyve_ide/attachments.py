@@ -67,14 +67,29 @@ def decode_data_url(data_url: str) -> bytes:
     return base64.b64decode(b64, validate=False)
 
 
+def uploads_dir() -> Path:
+    """Folder lampiran di config app, BUKAN di workspace.
+
+    Dulu file disimpan di <workspace>/.clyve/uploads sehingga muncul sebagai
+    perubahan git (dan diff biner sampah di panel Changes). Simpan di config
+    user supaya workspace tetap bersih.
+    """
+    try:
+        from .config import config_dir
+        base = config_dir() / "uploads"
+    except Exception:  # noqa: BLE001
+        base = Path.home() / ".clyve" / "uploads"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
 def save_upload(workspace: Path, name: str, data: bytes) -> dict:
     kind = classify(name)
     if kind == "image" and len(data) > MAX_IMAGE_BYTES:
         raise ValueError(f"gambar terlalu besar ({len(data)//1024} KB). Maks {MAX_IMAGE_BYTES//1024//1024} MB.")
     if len(data) > MAX_DOC_BYTES:
         raise ValueError(f"file terlalu besar ({len(data)//1024} KB). Maks {MAX_DOC_BYTES//1024//1024} MB.")
-    folder = Path(workspace) / ".clyve" / "uploads"
-    folder.mkdir(parents=True, exist_ok=True)
+    folder = uploads_dir()
     import time
     target = folder / f"{int(time.time())}-{safe_name(name)}"
     n = 1

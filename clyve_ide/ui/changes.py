@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from .. import gitutil
 from . import theme
 from .activity import ElidedLabel
+from .files import FilesTree
 
 MAX_FILES = 12
 
@@ -99,6 +100,9 @@ class FileHeader(QWidget):
 
         code = html.escape(info.get("code") or "M")
         badge_color = theme.WARN if info.get("untracked") else theme.MUTED
+        if info.get("binary"):
+            code = "BIN"
+            badge_color = theme.DIM
         self.badge = QLabel(code)
         self.badge.setStyleSheet(f"color:{badge_color};font-family:monospace;font-size:9.5px;")
         lay.addWidget(self.badge)
@@ -135,14 +139,26 @@ class FileBlock(QWidget):
         self.head.clicked.connect(self._toggle)
         lay.addWidget(self.head)
 
-        self.view = QTextBrowser()
-        self.view.setOpenExternalLinks(False)
-        self.view.setFont(_mono())
-        self.view.setStyleSheet(
-            f"QTextBrowser{{background:{theme.CODE_BG};border:1px solid {theme.LINE};"
-            f"border-radius:6px;padding:6px;}}")
-        self.view.setMaximumHeight(300)
-        self.view.setHtml(diff_to_html(diff_text))
+        self.view = QWidget()
+        self._inner = QVBoxLayout(self.view)
+        self._inner.setContentsMargins(0, 0, 0, 0)
+        if info.get("binary"):
+            note = QLabel("File biner (gambar/arsip) - isi tidak ditampilkan sebagai diff.")
+            note.setStyleSheet(f"color:{theme.DIM};font-size:10.5px;padding:6px 8px;"
+                               f"background:{theme.CODE_BG};border:1px solid {theme.LINE};"
+                               f"border-radius:6px;")
+            note.setWordWrap(True)
+            self._inner.addWidget(note)
+        else:
+            browser = QTextBrowser()
+            browser.setOpenExternalLinks(False)
+            browser.setFont(_mono())
+            browser.setStyleSheet(
+                f"QTextBrowser{{background:{theme.CODE_BG};border:1px solid {theme.LINE};"
+                f"border-radius:6px;padding:6px;}}")
+            browser.setMaximumHeight(300)
+            browser.setHtml(diff_to_html(diff_text))
+            self._inner.addWidget(browser)
         self.view.setVisible(bool(self._open))
         lay.addWidget(self.view)
 
@@ -210,6 +226,9 @@ class ChangesPanel(QFrame):
         commit_row.addWidget(self.commit_btn)
         lay.addLayout(commit_row)
 
+        self.files = FilesTree(root)
+        lay.addWidget(self.files)
+
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
@@ -232,6 +251,7 @@ class ChangesPanel(QFrame):
     # ------------------------------------------------------------------ api
     def set_root(self, root: str) -> None:
         self.root = root or ""
+        self.files.set_root(self.root)
         self.refresh()
 
     def refresh(self) -> None:

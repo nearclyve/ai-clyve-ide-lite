@@ -152,8 +152,13 @@ class AgentSession:
         return out
 
     # ------------------------------------------------------------------ http
-    def _stream_chat(self, on_delta):
-        """Yield (assistant_message, usage) after streaming one completion."""
+    def _stream_chat(self, on_delta, on_reasoning=None):
+        """Yield (assistant_message, usage) after streaming one completion.
+
+        `on_reasoning` menerima token penalaran model (delta.reasoning /
+        reasoning_content). Tanpa ini, model reasoning tampak "diam" lama
+        karena konten baru muncul setelah proses berpikir selesai.
+        """
         payload = json.dumps({
             "model": self.model,
             "messages": self.messages,
@@ -194,6 +199,11 @@ class AgentSession:
                             if delta.get("content"):
                                 content.append(delta["content"])
                                 on_delta(delta["content"])
+                            else:
+                                think = (delta.get("reasoning")
+                                         or delta.get("reasoning_content") or "")
+                                if think and on_reasoning is not None:
+                                    on_reasoning(think)
                             for tc in delta.get("tool_calls") or []:
                                 idx = tc.get("index", 0)
                                 slot = tool_calls.setdefault(
@@ -297,6 +307,10 @@ class AgentSession:
             text += ("\n\n--- Lampiran dari user ---\n" + ctx +
                      "\n--- akhir lampiran ---")
         if images:
+            n = len(images)
+            text += (f"\n\n[{n} gambar benar-benar dilampirkan pada pesan ini. "
+                     "Lihat isi gambarnya dan jawab berdasarkan gambar tersebut. "
+                     "Jangan menjawab bahwa kamu tidak bisa melihat gambar.]")
             content = [{"type": "text", "text": text}] + [image_part(p) for p in images]
         else:
             content = text
@@ -325,7 +339,7 @@ class AgentSession:
 
                 def worker():
                     try:
-                        msg, usage = self._stream_chat(wd)
+                        msg, usage = self._stream_chat(wd, rd)
                         q.put(("m", (msg, usage)))
                     except Exception as e:  # noqa: BLE001
                         q.put(("e", str(e)))
@@ -335,6 +349,9 @@ class AgentSession:
                 def wd(t: str) -> None:
                     partial.append(t)
                     q.put(("d", t))
+
+                def rd(t: str) -> None:
+                    q.put(("r", t))
 
                 th = threading.Thread(target=worker, daemon=True)
                 th.start()
@@ -349,6 +366,8 @@ class AgentSession:
                         continue
                     if kind == "d":
                         yield _sse({"type": "delta", "text": val})
+                    elif kind == "r":
+                        yield _sse({"type": "reasoning", "text": val})
                     elif kind == "e":
                         if val == "__cancelled__":
                             if partial:
