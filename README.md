@@ -15,7 +15,15 @@ jalankan terminal, baca PDF/gambar, dan ngoding bareng model Clyve.
 
 ## Install (Windows)
 
-1. Unduh `AIClyveIDELite-Setup-<versi>.exe` dari tab **Releases** repo ini.
+1. Unduh installer dari tab **Releases** repo ini — atau pakai link langsung
+   (tanpa halaman rilis, tanpa zip):
+
+   ```
+   https://github.com/nearclyve/ai-clyve-ide-lite/releases/latest/download/AIClyveIDELite-Setup.exe
+   ```
+
+   Link ini stabil: selalu menunjuk installer versi terbaru, cocok dipasang di
+   tombol download website.
 2. Jalankan installer. Pemasangan **per-user** (tanpa admin/UAC), muncul di
    **Apps & Features**, plus shortcut **Start Menu** dan Desktop.
 3. Buka dari Start Menu. Tidak ada window terminal yang ikut terbuka
