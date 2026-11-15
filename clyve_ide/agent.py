@@ -406,10 +406,10 @@ class AgentSession:
                         args = json.loads(raw_args)
                     except json.JSONDecodeError:
                         args = {}
-                        yield _sse({"type": "tool_start", "name": name, "args": raw_args[:500]})
+                        yield _sse({"type": "tool_start", "id": tc.get("id"), "name": name, "args": raw_args[:500]})
                         out = "ERROR: arguments were not valid JSON. Re-send the call with valid JSON."
                     else:
-                        yield _sse({"type": "tool_start", "name": name, "args": args})
+                        yield _sse({"type": "tool_start", "id": tc.get("id"), "name": name, "args": args})
                         fn = getattr(self.tools, name, None)
                         t0 = time.time()
                         if fn is None:
@@ -422,7 +422,8 @@ class AgentSession:
                                 out = f"ERROR: bad arguments for {name}: {e}"
                             except Exception as e:  # noqa: BLE001
                                 out = f"ERROR: {type(e).__name__}: {e}"
-                        yield _sse({"type": "tool_end", "name": name, "ok": not out.startswith(("ERROR", "BLOCKED")),
+                        yield _sse({"type": "tool_end", "id": tc.get("id"), "name": name,
+                                    "ok": not out.startswith(("ERROR", "BLOCKED")),
                                     "result": out[:6000], "ms": int((time.time() - t0) * 1000)})
                     self.messages.append({"role": "tool", "tool_call_id": tc.get("id"),
                                           "content": out[:4000]})

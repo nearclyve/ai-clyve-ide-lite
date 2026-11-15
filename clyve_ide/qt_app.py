@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QPalette, QShortcut, QTextCursor
+from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QKeySequence, QPalette, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
@@ -25,55 +25,30 @@ from PySide6.QtWidgets import (
 
 from . import attachments as attach
 from . import config
+from . import gitutil
 from . import stt as stt_mod
 from .agent import AgentSession
 from .checkpoints import CheckpointStore
 from .server import list_chats, load_chat, save_chat
+from .ui import theme
+from .ui.activity import ActivityGroup, tool_summary
+from .ui.changes import ChangesPanel
+from .ui.terminal import TerminalPanel
+from .version import __version__
 
-BG = "#0b0d12"
-PANEL = "#0e1118"
-PANEL2 = "#12161f"
-LINE = "#232936"
-FG = "#e6e9f0"
-MUTED = "#98a1b6"
-ACCENT = "#5b8cff"
-OK = "#31c48d"
-ERR = "#f26d6d"
-WARN = "#f2b56d"
+# palet tunggal: semua warna berasal dari clyve_ide/ui/theme.py
+BG = theme.BG
+PANEL = theme.PANEL
+PANEL2 = theme.PANEL2
+LINE = theme.LINE
+FG = theme.FG
+MUTED = theme.MUTED
+ACCENT = theme.ACCENT
+OK = theme.OK
+ERR = theme.ERR
+WARN = theme.WARN
 
-QSS = f"""
-QWidget {{ background:{BG}; color:{FG}; font-size:13px; }}
-QFrame#side {{ background:{PANEL}; border-right:1px solid {LINE}; }}
-QLabel#brand {{ font-size:14px; font-weight:700; }}
-QLabel.section {{ color:#828da6; font-size:10px; letter-spacing:1px; }}
-QPushButton {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:8px;
-    padding:7px 12px; min-height:20px; }}
-QPushButton:hover {{ border-color:#3a4560; }}
-QPushButton#primary {{ background:#4a74e8; border-color:#4a74e8; color:white; font-weight:600; padding:8px 16px; }}
-QPushButton#primary:hover {{ background:#5b84f5; }}
-QPushButton#danger {{ background:#5a2020; border-color:#7c2c2c; color:#ffd9d9; }}
-QPushButton:disabled {{ color:#5a6478; border-color:#1e2531; }}
-QComboBox, QLineEdit {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:8px;
-    padding:6px 10px; min-height:22px; }}
-QComboBox::drop-down {{ border:none; }}
-QPlainTextEdit#input {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:12px;
-    padding:10px 12px; font-size:13px; }}
-QPlainTextEdit#input:focus {{ border-color:#3d6ff0; }}
-QTextBrowser {{ background:{BG}; border:none; }}
-QListWidget {{ background:{PANEL}; border:none; outline:none; }}
-QListWidget::item {{ padding:6px 8px; border-radius:6px; color:#b8c2d6; }}
-QListWidget::item:selected {{ background:#161f31; color:#dbe6ff; }}
-QListWidget::item:hover {{ background:#141925; }}
-QScrollBar:vertical {{ background:transparent; width:10px; margin:2px; }}
-QScrollBar::handle:vertical {{ background:#2f3a4f; border-radius:4px; min-height:28px; }}
-QScrollBar::handle:vertical:hover {{ background:#3c4a63; }}
-QScrollBar::add-line, QScrollBar::sub-line {{ height:0; }}
-QCheckBox {{ color:{MUTED}; spacing:7px; }}
-QCheckBox::indicator {{ width:15px; height:15px; border:1px solid #33405a; border-radius:4px;
-    background:{PANEL2}; }}
-QCheckBox::indicator:checked {{ background:#3f6ddb; border-color:#5b8cff; }}
-QDialog {{ background:{BG}; }}
-"""
+QSS = theme.QSS  # satu sumber gaya: clyve_ide/ui/theme.py
 
 
 # --------------------------------------------------------------------- utils
@@ -110,23 +85,6 @@ def fmt_size(n: int) -> str:
     if n < 1024 * 1024:
         return f"{n // 1024} KB"
     return f"{n / 1024 / 1024:.1f} MB"
-
-
-def arg_summary(name: str, args: dict) -> str:
-    a = args or {}
-    if name in ("read_file", "write_file", "edit_file", "delete_path", "make_dir", "list_dir", "open_path"):
-        return str(a.get("path") or ".")
-    if name == "search_files":
-        return f"{a.get('pattern', '')} {a.get('glob', '')}".strip()
-    if name == "run_shell":
-        return str(a.get("cmd") or "")
-    if name == "sqlite_query":
-        return f"{a.get('db', '')}: {str(a.get('sql', ''))[:60]}"
-    if name == "http_request":
-        return f"{str(a.get('method', 'GET')).upper()} {a.get('url', '')}"
-    if name == "open_url":
-        return str(a.get("url") or "")
-    return json.dumps(a, ensure_ascii=False)[:80]
 
 
 # --------------------------------------------------------------------- worker
@@ -416,16 +374,18 @@ class Bubble(QFrame):
         is_user = role == "user"
         self.setObjectName("userBubble" if is_user else "botBubble")
         self.setStyleSheet(
-            "QFrame#userBubble{background:#22406f;border:1px solid #4f7cd6;border-radius:14px;}"
-            "QFrame#botBubble{background:#151d2b;border:1px solid #2b3850;border-radius:14px;}")
+            f"QFrame#userBubble{{background:{theme.INPUT};border:1px solid #3d3357;"
+            f"border-radius:13px;}}"
+            f"QFrame#botBubble{{background:{theme.PANEL};border:1px solid {theme.LINE};"
+            f"border-radius:13px;}}")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 11, 16, 13)
         lay.setSpacing(5)
         who = QLabel("KAMU" if is_user else "CLYVE")
         who.setStyleSheet(
-            "color:#cfe0ff;font-size:10px;font-weight:700;letter-spacing:0.6px;"
+            f"color:{theme.MUTED};font-size:9.5px;font-weight:700;letter-spacing:0.7px;"
             if is_user else
-            f"color:{OK};font-size:10px;font-weight:700;letter-spacing:0.6px;")
+            f"color:{theme.ACCENT};font-size:9.5px;font-weight:700;letter-spacing:0.7px;")
         lay.addWidget(who)
         self.body = QLabel()
         self.body.setWordWrap(True)
@@ -433,8 +393,7 @@ class Bubble(QFrame):
         self.body.setOpenExternalLinks(True)
         self.body.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
         self.body.setStyleSheet(
-            "color:#f4f8ff;font-size:13.5px;line-height:150%;background:transparent;" if is_user
-            else f"color:{FG};font-size:13.5px;line-height:150%;background:transparent;")
+            f"color:{FG};font-size:13.5px;line-height:150%;background:transparent;")
         lay.addWidget(self.body)
 
 
@@ -476,9 +435,9 @@ class ChatView(QScrollArea):
         rl.setSpacing(0)
         if align_right:
             rl.addStretch(1)
-        rl.addWidget(widget)
-        if not align_right:
-            rl.addStretch(1)
+            rl.addWidget(widget)
+        else:
+            rl.addWidget(widget, 1)
         self.lay.addWidget(row)
         if follow:
             self.scroll_bottom(force=True)
@@ -555,188 +514,355 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # ---------------- sidebar
+        outer.addWidget(self._build_sidebar())
+
+        main = QWidget()
+        ml = QVBoxLayout(main)
+        ml.setContentsMargins(0, 0, 0, 0)
+        ml.setSpacing(0)
+        ml.addWidget(self._build_topbar())
+
+        self.chat = ChatView()
+        ml.addWidget(self.chat, 1)
+        ml.addWidget(self._build_composer())
+
+        self.terminal = TerminalPanel(self.session.workspace)
+        self.terminal.setVisible(False)
+        self.terminal.setFixedHeight(190)
+        ml.addWidget(self.terminal)
+        outer.addWidget(main, 1)
+
+        self.changes = ChangesPanel(self.session.workspace)
+        self.changes.message.connect(self._on_git_message)
+        outer.addWidget(self.changes)
+
+        self.setCentralWidget(root)
+        QShortcut(QKeySequence("Ctrl+N"), self, self._new_chat)
+        QShortcut(QKeySequence("Ctrl+O"), self, self._choose_workspace)
+        QShortcut(QKeySequence("Ctrl+J"), self, self._toggle_terminal)
+        QShortcut(QKeySequence("Ctrl+K"), self, lambda: self.search.setFocus())
+        QTimer.singleShot(250, self.changes.refresh)
+        QTimer.singleShot(1200, lambda: self._check_update(silent=True))
+
+    # ---------------------------------------------------------- build: sidebar
+    def _build_sidebar(self) -> QFrame:
         side = QFrame()
         side.setObjectName("side")
-        side.setFixedWidth(272)
+        side.setFixedWidth(252)
         sl = QVBoxLayout(side)
-        sl.setContentsMargins(14, 14, 14, 14)
-        sl.setSpacing(10)
+        sl.setContentsMargins(12, 12, 12, 10)
+        sl.setSpacing(8)
 
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(4)
         brand = QLabel("◈  " + (self.cfg.get("app_name") or "AI Clyve IDE Lite"))
         brand.setObjectName("brand")
-        sl.addWidget(brand)
+        brand_row.addWidget(brand)
+        brand_row.addStretch(1)
+        ver = QLabel("v" + __version__)
+        ver.setStyleSheet(f"color:{theme.DIM};font-family:monospace;font-size:9.5px;")
+        brand_row.addWidget(ver)
+        sl.addLayout(brand_row)
 
-        sl.addWidget(self._section("Workspace"))
-        self.ws_label = QLabel(self.cfg["workspace"])
-        self.ws_label.setWordWrap(False)
-        self.ws_label.setStyleSheet(f"font-family:monospace;font-size:11.5px;color:#aab4c8;"
-                                    f"background:{PANEL2};border:1px solid {LINE};"
-                                    f"border-radius:7px;padding:6px 8px;")
-        sl.addWidget(self.ws_label)
-        row = QHBoxLayout()
-        b_explore = QPushButton("Buka folder")
-        b_explore.clicked.connect(self._open_workspace)
-        b_switch = QPushButton("Ganti")
-        b_switch.setFixedWidth(78)
-        b_switch.clicked.connect(self._choose_workspace)
-        row.setSpacing(6)
-        row.addWidget(b_explore, 1)
-        row.addWidget(b_switch)
-        sl.addLayout(row)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search threads")
+        self.search.setFixedHeight(28)
+        self.search.setStyleSheet(
+            f"QLineEdit{{background:{theme.PANEL2};border:1px solid {theme.LINE};"
+            f"border-radius:7px;padding:3px 9px;font-size:11.5px;}}")
+        self.search.textChanged.connect(self._filter_threads)
+        sl.addWidget(self.search)
 
-        sl.addWidget(self._section("Akses folder"))
-        self.roots_label = QLabel("hanya workspace")
-        self.roots_label.setStyleSheet(f"color:#7d879f;font-size:11px;")
-        sl.addWidget(self.roots_label)
-        b_addroot = QPushButton("+ Folder ke izin")
-        b_addroot.clicked.connect(self._add_root)
-        sl.addWidget(b_addroot)
-        self.full_access = QCheckBox("Akses seluruh disk")
-        self.full_access.setStyleSheet(f"color:#aeb8cc;font-size:11.5px;spacing:8px;")
-        self.full_access.setChecked(bool(self.cfg.get("full_access")))
-        self.full_access.stateChanged.connect(self._toggle_full_access)
-        sl.addWidget(self.full_access)
-
-        sl.addWidget(self._section("Model"))
-        self.model_box = QComboBox()
-        self.model_box.setFixedHeight(34)
-        self.model_box.currentTextChanged.connect(self._model_changed)
-        sl.addWidget(self.model_box)
-
-        sl.addWidget(self._section("Mode"))
-        self.mode_box = QComboBox()
-        self.mode_box.setFixedHeight(34)
-        self.mode_box.addItems(["Auto", "Review", "Plan"])
-        self.mode_box.currentTextChanged.connect(self._mode_changed)
-        sl.addWidget(self.mode_box)
-
-        hist_head = QHBoxLayout()
-        hist_head.setSpacing(6)
-        hist_head.addWidget(self._section("Riwayat chat"))
-        hist_head.addStretch(1)
-        self.new_chat_btn = QPushButton("+ Chat baru")
-        self.new_chat_btn.setFixedHeight(26)
+        self.new_chat_btn = QPushButton("+  New thread")
+        self.new_chat_btn.setCursor(Qt.PointingHandCursor)
         self.new_chat_btn.setStyleSheet(
-            f"QPushButton{{background:#1a2334;border:1px solid {LINE};border-radius:7px;"
-            f"padding:2px 9px;font-size:11px;font-weight:600;color:#c7d3ea;}}"
-            "QPushButton:hover{background:#22304a;}")
+            f"QPushButton{{background:transparent;border:none;border-radius:6px;"
+            f"color:{theme.MUTED};text-align:left;padding:4px 8px;font-size:12px;}}"
+            f"QPushButton:hover{{background:{theme.PANEL2};color:{FG};}}")
         self.new_chat_btn.clicked.connect(self._new_chat)
-        hist_head.addWidget(self.new_chat_btn)
-        sl.addLayout(hist_head)
+        sl.addWidget(self.new_chat_btn)
 
+        sl.addWidget(self._section("Threads"))
         self.history = QListWidget()
         self.history.setMinimumHeight(120)
         self.history.setWordWrap(True)
         self.history.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.history.setStyleSheet(
-            f"QListWidget{{background:{PANEL};border:none;color:#b8c2d6;}}"
-            f"QListWidget::item{{padding:6px 8px;border-radius:6px;}}"
-            f"QListWidget::item:selected{{background:#161f31;color:#dbe6ff;}}")
+            f"QListWidget{{background:transparent;border:none;color:{theme.MUTED};}}"
+            f"QListWidget::item{{padding:5px 8px;border-radius:6px;}}"
+            f"QListWidget::item:selected{{background:{theme.PANEL2};color:{FG};}}")
         pal2 = self.history.palette()
-        pal2.setColor(QPalette.Base, QColor(PANEL))
-        pal2.setColor(QPalette.Text, QColor("#b8c2d6"))
+        pal2.setColor(QPalette.Base, QColor(theme.PANEL))
+        pal2.setColor(QPalette.Text, QColor(theme.MUTED))
         self.history.setPalette(pal2)
         self.history.itemClicked.connect(self._open_chat)
         sl.addWidget(self.history, 1)
 
-        sl.addSpacing(4)
-        sep = QFrame()
-        sep.setFixedHeight(1)
-        sep.setStyleSheet(f"background:{LINE};")
-        sl.addWidget(sep)
-        sl.addSpacing(2)
+        sl.addWidget(self._divider())
 
-        b_cp = QPushButton("Checkpoint / rollback")
+        ws_head = QHBoxLayout()
+        ws_head.setSpacing(4)
+        ws_head.addWidget(self._section("Workspace"))
+        ws_head.addStretch(1)
+        b_open = QPushButton("Buka")
+        b_open.setObjectName("ghost")
+        b_open.setFixedHeight(20)
+        b_open.setStyleSheet(f"QPushButton{{font-size:10.5px;color:{theme.MUTED};"
+                             f"background:transparent;border:none;padding:0 4px;}}"
+                             f"QPushButton:hover{{color:{FG};}}")
+        b_open.clicked.connect(self._open_workspace)
+        ws_head.addWidget(b_open)
+        b_switch = QPushButton("Ganti")
+        b_switch.setObjectName("ghost")
+        b_switch.setFixedHeight(20)
+        b_switch.setStyleSheet(f"QPushButton{{font-size:10.5px;color:{theme.MUTED};"
+                               f"background:transparent;border:none;padding:0 4px;}}"
+                               f"QPushButton:hover{{color:{FG};}}")
+        b_switch.clicked.connect(self._choose_workspace)
+        ws_head.addWidget(b_switch)
+        sl.addLayout(ws_head)
+
+        self.ws_label = QLabel(self.cfg["workspace"])
+        self.ws_label.setWordWrap(False)
+        self.ws_label.setStyleSheet(
+            f"font-family:monospace;font-size:10.5px;color:{theme.MUTED};"
+            f"background:{theme.PANEL2};border:1px solid {theme.LINE};"
+            f"border-radius:6px;padding:4px 7px;")
+        self.ws_label.setToolTip(self.cfg["workspace"])
+        self.ws_label.setMinimumWidth(0)
+        sl.addWidget(self.ws_label)
+        QTimer.singleShot(0, lambda: self._set_ws_path(self.cfg["workspace"]))
+
+        acc = QHBoxLayout()
+        acc.setSpacing(6)
+        b_addroot = QPushButton("+ Folder")
+        b_addroot.setObjectName("ghost")
+        b_addroot.setFixedHeight(22)
+        b_addroot.setStyleSheet(f"QPushButton{{font-size:10.5px;color:{theme.MUTED};"
+                                f"background:transparent;border:none;padding:0 4px;}}"
+                                f"QPushButton:hover{{color:{FG};}}")
+        b_addroot.setToolTip("Izinkan folder tambahan di luar workspace")
+        b_addroot.clicked.connect(self._add_root)
+        acc.addWidget(b_addroot)
+        acc.addStretch(1)
+        sl.addLayout(acc)
+
+        self.roots_label = QLabel("hanya workspace")
+        self.roots_label.setStyleSheet(f"color:{theme.DIM};font-size:10px;")
+        self.roots_label.setWordWrap(True)
+        sl.addWidget(self.roots_label)
+
+        self.full_access = QCheckBox("Akses seluruh disk")
+        self.full_access.setStyleSheet(f"color:{theme.MUTED};font-size:10.5px;spacing:6px;")
+        self.full_access.setChecked(bool(self.cfg.get("full_access")))
+        self.full_access.stateChanged.connect(self._toggle_full_access)
+        sl.addWidget(self.full_access)
+
+        sl.addWidget(self._divider())
+
+        foot = QHBoxLayout()
+        foot.setSpacing(4)
+        b_cp = QPushButton("Checkpoint")
+        b_cp.setObjectName("ghost")
+        b_cp.setStyleSheet(f"QPushButton{{font-size:10.5px;color:{theme.MUTED};"
+                           f"background:transparent;border:none;padding:2px 4px;}}"
+                           f"QPushButton:hover{{color:{FG};}}")
+        b_cp.setToolTip("Checkpoint / rollback file")
         b_cp.clicked.connect(self._open_checkpoints)
-        sl.addWidget(b_cp)
-
-        keyrow = QHBoxLayout()
-        keyrow.setSpacing(6)
-        self.key_label = QLabel(config.mask(self.cfg.get("api_key", "")))
-        self.key_label.setStyleSheet("font-family:monospace;font-size:10.5px;color:#7c869c;"
-                                     "border:none;background:transparent;")
-        keyrow.addWidget(self.key_label)
-        keyrow.addStretch(1)
+        foot.addWidget(b_cp)
         b_key = QPushButton("Ganti key")
-        b_key.setFixedWidth(84)
+        b_key.setObjectName("ghost")
+        b_key.setStyleSheet(f"QPushButton{{font-size:10.5px;color:{theme.MUTED};"
+                            f"background:transparent;border:none;padding:2px 4px;}}"
+                            f"QPushButton:hover{{color:{FG};}}")
         b_key.clicked.connect(self._change_key)
-        keyrow.addWidget(b_key)
-        sl.addLayout(keyrow)
+        foot.addWidget(b_key)
+        foot.addStretch(1)
+        sl.addLayout(foot)
 
-        outer.addWidget(side)
+        self.key_label = QLabel(config.mask(self.cfg.get("api_key", "")))
+        self.key_label.setStyleSheet(f"font-family:monospace;font-size:9.5px;color:{theme.DIM};")
+        sl.addWidget(self.key_label)
+        return side
 
-        # ---------------- main
-        main = QWidget()
-        ml = QVBoxLayout(main)
-        ml.setContentsMargins(0, 0, 0, 0)
-        ml.setSpacing(0)
-
+    # ---------------------------------------------------------- build: topbar
+    def _build_topbar(self) -> QFrame:
         top = QFrame()
-        top.setStyleSheet(f"border-bottom:1px solid {LINE};")
+        top.setObjectName("topbar")
+        top.setFixedHeight(42)
         tl = QHBoxLayout(top)
-        tl.setContentsMargins(18, 10, 18, 10)
-        self.crumb = QLabel(self.cfg["workspace"])
-        self.crumb.setStyleSheet("font-family:monospace;font-size:11.5px;color:#a8b3c7;")
-        self.crumb.setToolTip(self.cfg["workspace"])
-        tl.addWidget(self.crumb)
+        tl.setContentsMargins(14, 0, 8, 0)
+        tl.setSpacing(8)
+
+        self.title_label = QLabel("New thread")
+        self.title_label.setStyleSheet("font-size:12.5px;font-weight:600;")
+        tl.addWidget(self.title_label)
+
+        self.ws_badge = QLabel(Path(self.cfg["workspace"]).name or "workspace")
+        self.ws_badge.setStyleSheet(
+            f"color:{theme.MUTED};font-size:10px;background:{theme.PANEL2};"
+            f"border:1px solid {theme.LINE};border-radius:5px;padding:1px 6px;")
+        tl.addWidget(self.ws_badge)
         tl.addStretch(1)
+
         self.status = QLabel("siap")
-        self.status.setStyleSheet(f"color:{MUTED};font-size:11.5px;")
-        self.status.setMinimumWidth(120)
+        self.status.setStyleSheet(f"color:{theme.DIM};font-size:11px;")
+        self.status.setMinimumWidth(80)
         self.status.setMaximumWidth(320)
         self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         tl.addWidget(self.status)
+
         self.stop_btn = QPushButton("Stop")
         self.stop_btn.setObjectName("danger")
         self.stop_btn.setVisible(False)
         self.stop_btn.clicked.connect(self._stop)
         tl.addWidget(self.stop_btn)
-        ml.addWidget(top)
 
-        self.chat = ChatView()
-        ml.addWidget(self.chat, 1)
+        self.update_btn = QPushButton("Cek update")
+        self.update_btn.setObjectName("ghost")
+        self.update_btn.setStyleSheet(f"QPushButton{{font-size:10.5px;color:{theme.MUTED};"
+                                      f"background:transparent;border:none;padding:2px 6px;}}"
+                                      f"QPushButton:hover{{color:{FG};}}")
+        self.update_btn.setToolTip("Periksa versi terbaru")
+        self.update_btn.clicked.connect(lambda: self._check_update(silent=False))
+        tl.addWidget(self.update_btn)
 
-        # attachments strip
+        self.btn_changes = QPushButton("▤")
+        self.btn_changes.setObjectName("ghost")
+        self.btn_changes.setCheckable(True)
+        self.btn_changes.setChecked(True)
+        self.btn_changes.setFixedWidth(26)
+        self.btn_changes.setToolTip("Panel Changes (Ctrl+Shift+G)")
+        self.btn_changes.clicked.connect(self._toggle_changes)
+        tl.addWidget(self.btn_changes)
+
+        self.btn_term = QPushButton("❯_")
+        self.btn_term.setObjectName("ghost")
+        self.btn_term.setCheckable(True)
+        self.btn_term.setFixedWidth(30)
+        self.btn_term.setToolTip("Terminal (Ctrl+J)")
+        self.btn_term.clicked.connect(self._toggle_terminal)
+        tl.addWidget(self.btn_term)
+        return top
+
+    # -------------------------------------------------------- build: composer
+    def _build_composer(self) -> QWidget:
+        holder = QWidget()
+        vl = QVBoxLayout(holder)
+        vl.setContentsMargins(16, 0, 16, 10)
+        vl.setSpacing(6)
+
         self.att_row = QHBoxLayout()
-        self.att_row.setContentsMargins(20, 0, 20, 0)
+        self.att_row.setContentsMargins(0, 0, 0, 0)
         self.att_row.setSpacing(6)
         self.att_row.addStretch(1)
         att_holder = QWidget()
         att_holder.setLayout(self.att_row)
-        ml.addWidget(att_holder)
+        vl.addWidget(att_holder)
 
-        bottom = QWidget()
-        bl = QHBoxLayout(bottom)
-        bl.setContentsMargins(20, 8, 20, 16)
-        bl.setSpacing(8)
-        b_att = QPushButton("Lampir")
-        b_att.setFixedSize(64, 46)
-        b_att.setToolTip("Lampirkan gambar/PDF/dokumen")
+        frame = QFrame()
+        frame.setObjectName("composer")
+        frame.setStyleSheet(
+            f"QFrame#composer{{background:{theme.INPUT};border:1px solid {theme.LINE};"
+            f"border-radius:12px;}}")
+        fl = QVBoxLayout(frame)
+        fl.setContentsMargins(8, 4, 8, 4)
+        fl.setSpacing(0)
+
+        r1 = QHBoxLayout()
+        r1.setSpacing(6)
+        b_att = QPushButton("+")
+        b_att.setObjectName("ghost")
+        b_att.setFixedSize(26, 26)
+        b_att.setToolTip("Lampirkan gambar/PDF/dokumen (Ctrl+V untuk tempel gambar)")
+        b_att.setStyleSheet(f"QPushButton{{background:transparent;border:1px solid {theme.LINE};"
+                            f"border-radius:6px;color:{theme.MUTED};font-size:14px;}}"
+                            f"QPushButton:hover{{color:{FG};border-color:#3d3357;}}")
         b_att.clicked.connect(self._pick_files)
-        bl.addWidget(b_att)
+        r1.addWidget(b_att, 0, Qt.AlignBottom)
 
         self.input = ChatInput()
         self.input.setObjectName("input")
         self.input.image_pasted.connect(self._paste_image)
-        self.input.setPlaceholderText("Tulis instruksi... (Enter kirim, Shift+Enter baris baru, Ctrl+V tempel gambar)")
-        self.input.setFixedHeight(52)
+        self.input.setPlaceholderText("Tulis instruksi... (Enter kirim, Shift+Enter baris baru)")
+        self.input.setFixedHeight(46)
+        self.input.setStyleSheet(
+            f"QPlainTextEdit#input{{background:transparent;border:none;padding:4px 2px;"
+            f"font-size:13px;}}")
         self.input.installEventFilter(self)
-        bl.addWidget(self.input, 1)
-        self.send_btn = QPushButton("Kirim")
+        r1.addWidget(self.input, 1)
+
+        self.send_btn = QPushButton("↑")
         self.send_btn.setObjectName("primary")
-        self.send_btn.setFixedWidth(96)
-        self.send_btn.setFixedHeight(52)
+        self.send_btn.setFixedSize(30, 30)
+        self.send_btn.setStyleSheet(
+            f"QPushButton{{background:{theme.ACCENT_DARK};border:none;border-radius:8px;"
+            f"color:white;font-size:15px;font-weight:700;}}"
+            f"QPushButton:hover{{background:{theme.ACCENT};}}"
+            f"QPushButton:disabled{{background:{theme.PANEL2};color:{theme.DIM};}}")
         self.send_btn.clicked.connect(self._send)
-        bl.addWidget(self.send_btn)
-        ml.addWidget(bottom)
+        r1.addWidget(self.send_btn, 0, Qt.AlignBottom)
+        fl.addLayout(r1)
 
-        outer.addWidget(main, 1)
-        self.setCentralWidget(root)
+        r2 = QHBoxLayout()
+        r2.setSpacing(2)
+        self.model_box = QComboBox()
+        self.model_box.setObjectName("mini")
+        self.model_box.setMinimumWidth(148)
+        self.model_box.setMaximumWidth(260)
+        self.model_box.currentTextChanged.connect(self._model_changed)
+        r2.addWidget(self.model_box)
 
-        QShortcut(QKeySequence("Ctrl+N"), self, self._new_chat)
-        QShortcut(QKeySequence("Ctrl+O"), self, self._choose_workspace)
+        self.mode_box = QComboBox()
+        self.mode_box.setObjectName("mini")
+        self.mode_box.addItems(["Auto", "Review", "Plan"])
+        self.mode_box.setToolTip("Auto = langsung jalan · Review = minta setuju tiap ubah · "
+                                 "Plan = read-only")
+        self.mode_box.currentTextChanged.connect(self._mode_changed)
+        r2.addWidget(self.mode_box)
+
+        ask = QLabel("Ask for approval")
+        ask.setStyleSheet(f"color:{theme.DIM};font-size:10px;padding-left:6px;")
+        r2.addWidget(ask)
+        r2.addStretch(1)
+        hint = QLabel("Enter kirim · Shift+Enter baris baru")
+        hint.setStyleSheet(f"color:{theme.DIM};font-size:9.5px;")
+        r2.addWidget(hint)
+        fl.addLayout(r2)
+
+        vl.addWidget(frame)
+        return holder
+
+    def _divider(self) -> QFrame:
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(f"background:{theme.LINE};")
+        return sep
+
+    def _filter_threads(self, text: str) -> None:
+        needle = (text or "").strip().lower()
+        for i in range(self.history.count()):
+            it = self.history.item(i)
+            it.setHidden(bool(needle) and needle not in it.text().lower())
+
+    def _toggle_changes(self) -> None:
+        visible = not self.changes.isVisible()
+        self.changes.setVisible(visible)
+        self.btn_changes.setChecked(visible)
+        if visible:
+            self.changes.refresh()
+
+    def _toggle_terminal(self) -> None:
+        visible = not self.terminal.isVisible()
+        self.terminal.setVisible(visible)
+        self.btn_term.setChecked(visible)
+        if visible and (self.terminal.proc is None
+                        or self.terminal.proc.state() == self.terminal.proc.NotRunning):
+            self.terminal.start()
+
+    def _on_git_message(self, text: str, ok: bool) -> None:
+        self._set_status(text[:80], OK if ok else ERR)
 
     def _section(self, text: str) -> QLabel:
         lab = QLabel(text.upper())
@@ -792,6 +918,14 @@ class MainWindow(QMainWindow):
         except Exception as e:  # noqa: BLE001
             self._set_status(f"gagal buka folder: {e}")
 
+    def _set_ws_path(self, path: str) -> None:
+        """Tampilkan path ter-elide di tengah supaya ekor folder tetap terbaca."""
+        self.ws_label.ensurePolished()
+        fm = self.ws_label.fontMetrics()
+        avail = max(120, self.ws_label.width() - 18)
+        self.ws_label.setText(fm.elidedText(path, Qt.ElideMiddle, avail))
+        self.ws_label.setToolTip(path)
+
     def _choose_workspace(self):
         path = QFileDialog.getExistingDirectory(self, "Pilih workspace", self.session.workspace)
         if not path:
@@ -799,8 +933,12 @@ class MainWindow(QMainWindow):
         self.cfg["workspace"] = path
         config.save(self.cfg)
         self.session.set_workspace(path)
-        self.ws_label.setText(path)
-        self.crumb.setText(path)
+        self._set_ws_path(path)
+        self.ws_badge.setText(Path(path).name or "workspace")
+        if getattr(self, "changes", None) is not None:
+            self.changes.set_root(path)
+        if getattr(self, "terminal", None) is not None:
+            self.terminal.set_cwd(path)
 
     def _add_root(self):
         path = QFileDialog.getExistingDirectory(self, "Izinkan folder", self.session.workspace)
@@ -857,6 +995,7 @@ class MainWindow(QMainWindow):
             first = False
         import uuid
         self.current_chat = uuid.uuid4().hex[:12]
+        self.title_label.setText("New thread")
         self.session.reset()
         self.session.set_chat(self.current_chat)
         self.chat.clear()
@@ -878,6 +1017,7 @@ class MainWindow(QMainWindow):
             self._set_status("selesaikan/stop dulu")
             return
         self.current_chat = cid
+        self.title_label.setText((item.text() or "Thread")[:60])
         self.session.set_chat(cid)
         self.session.load(chat.get("messages") or [])
         self._welcome = False
@@ -922,19 +1062,12 @@ class MainWindow(QMainWindow):
         bubble.body.setText(body_html)
         return bubble
 
-    def _append_tool(self, name: str, detail: str, ok: bool | None):
-        color = MUTED if ok is None else (OK if ok else ERR)
-        icon = "⋯" if ok is None else ("✓" if ok else "✗")
-        chip = QLabel(
-            f"<span style='font-family:monospace;font-size:11px;color:{color};'>"
-            f"{icon} <b>{html.escape(name)}</b> "
-            f"<span style='color:#7d879f'>{html.escape(detail[:150])}</span></span>")
-        chip.setTextFormat(Qt.RichText)
-        chip.setWordWrap(True)
-        chip.setMinimumWidth(340)
-        chip.setStyleSheet(
-            "background:#0d1420;border:1px solid #1c2536;border-radius:8px;padding:6px 9px;")
-        self.chat.add_widget(chip)
+    def _activity_group(self) -> ActivityGroup:
+        """Satu grup 'Working · N' per giliran; baris tool update in-place by tool_call_id."""
+        if getattr(self, "_activity", None) is None:
+            self._activity = ActivityGroup()
+            self.chat.add_widget(self._activity)
+        return self._activity
 
     def _scroll(self):
         self.chat.scroll_bottom()
@@ -1001,12 +1134,16 @@ class MainWindow(QMainWindow):
         self.input.clear()
         self.attachments = []
         self._render_atts()
-        self._append_user(text + ("\n📎 " + ", ".join(a["name"] for a in atts) if atts else ""))
+        if self.title_label.text() in ("", "New thread"):
+            first = (text or (atts[0]["name"] if atts else "")).strip().splitlines()
+            self.title_label.setText((first[0] if first else "Thread")[:60])
+        self._append_user(text + ("\nLampiran: " + ", ".join(a["name"] for a in atts) if atts else ""))
         self.chat.scroll_bottom(force=True)
         self.busy = True
         self.send_btn.setEnabled(False)
         self.stop_btn.setVisible(True)
         self._set_status("berpikir...", WARN)
+        self._activity = None
         self._buf = []
         self._tools: dict[str, dict] = {}
         self._stream_started = False
@@ -1038,14 +1175,19 @@ class MainWindow(QMainWindow):
                     f"<div style='white-space:pre-wrap;'>{html.escape(raw)}</div>")
                 self.chat.scroll_bottom()
         elif t == "tool_start":
-            self._append_tool(ev.get("name", "?"),
-                              arg_summary(ev.get("name", ""), ev.get("args") or {}), None)
+            name = ev.get("name", "?")
+            self._activity_group().start_tool(
+                ev.get("id"), name, tool_summary(name, ev.get("args") or {}))
             self._scroll()
         elif t == "tool_end":
-            self._append_tool(ev.get("name", "?"), str(ev.get("result", ""))[:160],
-                              bool(ev.get("ok")))
+            name = ev.get("name", "?")
+            self._activity_group().end_tool(
+                ev.get("id"), name, bool(ev.get("ok")), ev.get("ms"),
+                str(ev.get("result") or ""))
             self._scroll()
         elif t == "done":
+            if getattr(self, "_activity", None) is not None:
+                self._activity.finish()
             self._finalize_stream(ev.get("content") or "")
             self._set_status("siap")
         elif t == "error":
@@ -1081,6 +1223,143 @@ class MainWindow(QMainWindow):
             pass
         self._refresh_models()
         self._scroll()
+        if getattr(self, "changes", None) is not None:
+            self.changes.refresh()
+
+    def closeEvent(self, ev):  # noqa: N802
+        # shell QProcess harus dimatikan eksplisit, kalau tidak Qt membunuhnya
+        # saat interpreter keluar (warning "Destroyed while process is running").
+        if getattr(self, "terminal", None) is not None:
+            self.terminal.stop()
+        super().closeEvent(ev)
+
+    # ------------------------------------------------------------------ update
+    def _check_update(self, silent: bool = True) -> None:
+        if isinstance(getattr(self, "_upd", None), UpdateCheckWorker) and self._upd.isRunning():
+            return
+        self._upd = UpdateCheckWorker(self)
+        self._upd.found.connect(self._on_update_found)
+        if not silent:
+            self._set_status("cek update...", WARN)
+            self._upd.finished_ok.connect(self._on_update_checked)
+        self._upd.start()
+
+    def _on_update_checked(self, found: bool) -> None:
+        if not found:
+            self._set_status(f"v{__version__} terbaru", OK)
+
+    def _on_update_found(self, info: dict) -> None:
+        dlg = UpdateDialog(info, self)
+        if dlg.exec() == QDialog.Accepted and dlg.downloaded:
+            try:
+                from . import updater
+                updater.launch_installer(dlg.downloaded)
+            except Exception as e:  # noqa: BLE001
+                self._set_status(f"gagal jalankan installer: {e}", ERR)
+                return
+            QApplication.quit()
+
+
+# --------------------------------------------------------------- update app
+class UpdateCheckWorker(QThread):
+    found = Signal(dict)
+    finished_ok = Signal(bool)
+
+    def run(self):
+        try:
+            from . import updater
+            info = updater.check()
+        except Exception:  # noqa: BLE001
+            info = None
+        if info:
+            self.found.emit(info)
+        self.finished_ok.emit(bool(info))
+
+
+class UpdateDownloadWorker(QThread):
+    progress = Signal(int, int)
+    done = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, url: str, parent=None):
+        super().__init__(parent)
+        self.url = url
+
+    def run(self):
+        try:
+            from . import updater
+            path = updater.download(self.url, progress=lambda got, total: self.progress.emit(got, total))
+            self.done.emit(str(path))
+        except Exception as e:  # noqa: BLE001
+            self.failed.emit(f"{type(e).__name__}: {e}")
+
+
+class UpdateDialog(QDialog):
+    """Prompt update: tampilkan versi + catatan rilis, unduh, lalu jalankan installer."""
+
+    def __init__(self, info: dict, parent=None):
+        super().__init__(parent)
+        self.info = info
+        self.downloaded = ""
+        self.setWindowTitle("Update tersedia")
+        self.resize(520, 380)
+        lay = QVBoxLayout(self)
+        title = QLabel(f"Versi {info.get('version')} tersedia")
+        title.setStyleSheet("font-size:16px;font-weight:700;")
+        lay.addWidget(title)
+        sub = QLabel(f"Versi terpasang: {__version__}. Update diunduh, dipasang, "
+                     "lalu app dibuka lagi otomatis.")
+        sub.setWordWrap(True)
+        sub.setStyleSheet(f"color:{theme.MUTED};font-size:11.5px;")
+        lay.addWidget(sub)
+        notes = QTextBrowser()
+        notes.setStyleSheet(f"QTextBrowser{{background:{theme.CODE_BG};border:1px solid {theme.LINE};"
+                            f"border-radius:8px;padding:8px;color:{theme.MUTED};font-size:11px;}}")
+        notes.setPlainText(info.get("notes") or "(tidak ada catatan rilis)")
+        lay.addWidget(notes, 1)
+        self.progress = QLabel("")
+        self.progress.setStyleSheet(f"color:{theme.MUTED};font-size:11px;")
+        lay.addWidget(self.progress)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        later = QPushButton("Nanti")
+        later.clicked.connect(self.reject)
+        row.addWidget(later)
+        self.go = QPushButton("Update sekarang")
+        self.go.setObjectName("primary")
+        self.go.clicked.connect(self._start)
+        row.addWidget(self.go)
+        lay.addLayout(row)
+        self.worker = None
+
+    def _start(self):
+        url = self.info.get("url") or ""
+        if not url:
+            self.progress.setText("URL installer tidak ada di rilis ini.")
+            return
+        self.go.setEnabled(False)
+        self.progress.setText("mengunduh...")
+        self.worker = UpdateDownloadWorker(url, self)
+        self.worker.progress.connect(self._on_progress)
+        self.worker.done.connect(self._on_done)
+        self.worker.failed.connect(self._on_failed)
+        self.worker.start()
+
+    def _on_progress(self, got: int, total: int) -> None:
+        if total:
+            self.progress.setText(f"mengunduh... {got * 100 // total}% "
+                                  f"({got / 1048576:.1f} / {total / 1048576:.1f} MB)")
+        else:
+            self.progress.setText(f"mengunduh... {got / 1048576:.1f} MB")
+
+    def _on_done(self, path: str) -> None:
+        self.downloaded = path
+        self.progress.setText("installer siap. App akan ditutup lalu update dipasang.")
+        self.accept()
+
+    def _on_failed(self, msg: str) -> None:
+        self.go.setEnabled(True)
+        self.progress.setText(f"gagal unduh: {msg[:160]}")
 
 
 def run(cfg: dict | None = None) -> int:
