@@ -30,6 +30,15 @@ jobs:
           "version=$v" >> $env:GITHUB_OUTPUT
           Write-Host "versi: $v"
 
+      - name: Cocokkan tag dengan versi
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          if ($tag -ne "${{ steps.ver.outputs.version }}") {
+            throw "Tag $tag != clyve_ide/version.py ${{ steps.ver.outputs.version }}. Naikkan versi dulu."
+          }
+
       - name: Install build deps
         run: |
           python -m pip install --upgrade pip
