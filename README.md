@@ -93,6 +93,10 @@ Windows: `build_exe.ps1` (butuh Python 3.10+; installer butuh Inno Setup 6:
 - **Panel Changes** — status git + diff per file dengan nomor baris, commit message langsung
   dari app (`git add -A` + `git commit`). Tombol di topbar atau `Ctrl+Shift+G`.
 - **Terminal interaktif** — panel bawah dengan shell hidup (cwd ikut workspace), `Ctrl+J`.
+- **Editor file bawaan** — klik dua kali file di tree workspace → tab editor (nomor baris,
+  syntax highlight untuk py/js/ts/php/json/html/css/md/sql/sh, indentasi otomatis),
+  `Ctrl+S` simpan, `Ctrl+W` tutup. File yang diubah agent otomatis dimuat ulang kalau
+  tidak sedang diedit; file biner dan >5 MB ditolak dengan pesan.
 - **File tree workspace** — di panel kanan bawah kotak commit, klik dua kali file untuk
   membukanya di aplikasi default OS. Folder yang dibuka diingat **per workspace**
   (`tree_state` di settings.json), jadi tidak terlipat lagi saat app dibuka atau
@@ -344,6 +348,7 @@ clyve_ide/
     activity.py     # blok "Working · N" (baris tool update in-place)
     changes.py      # panel Changes: status git + diff + commit
     terminal.py     # terminal interaktif (QProcess)
+    editor.py       # tab editor: line numbers, highlight, save, watcher
   gitutil.py        # status/diff/commit via subprocess git
   updater.py        # cek rilis GitHub + unduh installer
   version.py        # satu sumber versi (dipakai app, updater, CI)

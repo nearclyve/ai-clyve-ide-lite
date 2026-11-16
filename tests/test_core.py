@@ -446,6 +446,71 @@ class QueueTest(unittest.TestCase):
 
 
 @unittest.skipUnless(_qt_available(), "PySide6 tidak terpasang")
+class EditorTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication, QTabWidget, QWidget
+        from clyve_ide.ui.editor import EditorTabs
+        cls.app = QApplication.instance() or QApplication([])
+        cls.dir = Path(tempfile.mkdtemp(prefix="clyve-edit-"))
+        cls.tabs = QTabWidget()
+        cls.tabs.addTab(QWidget(), "Chat")
+        cls.ed = EditorTabs(cls.tabs)
+        cls.messages = []
+        cls.ed.status.connect(cls.messages.append)
+        cls.tabs.show()
+
+    def _make(self, name, text):
+        p = self.dir / name
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def test_open_edit_save(self):
+        p = self._make("contoh.py", "print('halo')\n")
+        ed = self.ed.open_path(str(p))
+        self.assertIsNotNone(ed)
+        self.assertIn("print", ed.toPlainText())
+        self.assertIsNotNone(ed.highlighter)
+        self.assertGreater(ed.line_number_width(), 10)
+        ed.selectAll()
+        ed.insertPlainText("print('berubah')\n")   # jalur edit nyata
+        self.app.processEvents()
+        self.assertTrue(ed.document().isModified())
+        idx = self.tabs.indexOf(ed)
+        self.assertTrue(self.tabs.tabText(idx).startswith("\u25cf"))
+        self.assertTrue(self.ed.save(ed))
+        self.assertEqual(p.read_text(encoding="utf-8"), "print('berubah')\n")
+        self.assertFalse(ed.document().isModified())
+
+    def test_reject_binary(self):
+        p = self.dir / "gambar.png"
+        p.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00")
+        self.assertIsNone(self.ed.open_path(str(p)))
+
+    def test_reload_from_disk(self):
+        p = self._make("data.json", '{"a": 1}')
+        ed = self.ed.open_path(str(p))
+        p.write_text('{"a": 2}', encoding="utf-8")
+        self.assertTrue(self.ed.reload_path(str(p)))
+        self.assertIn('"a": 2', ed.toPlainText())
+        # kalau ada edit lokal, jangan ditimpa
+        ed.selectAll()
+        ed.insertPlainText('{"lokal": true}')
+        p.write_text('{"a": 3}', encoding="utf-8")
+        self.assertFalse(self.ed.reload_path(str(p)))
+        self.assertIn("lokal", ed.toPlainText())
+        self.ed.save(ed)
+
+    def test_open_same_file_twice_reuses_tab(self):
+        p = self._make("ulang.txt", "x")
+        before = self.tabs.count()
+        self.ed.open_path(str(p))
+        self.ed.open_path(str(p))
+        self.assertEqual(self.tabs.count(), before + 1)
+
+
+@unittest.skipUnless(_qt_available(), "PySide6 tidak terpasang")
 class FilesTreeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

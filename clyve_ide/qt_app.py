@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
     QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSplitter,
-    QTextBrowser, QVBoxLayout, QWidget,
+    QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 from . import attachments as attach
@@ -35,6 +35,7 @@ from .server import list_chats, load_chat, save_chat
 from .ui import theme
 from .ui.activity import ActivityGroup, tool_summary
 from .ui.changes import ChangesPanel
+from .ui.editor import EditorTabs
 from .ui.terminal import TerminalPanel
 from .version import __version__
 
@@ -636,9 +637,17 @@ class MainWindow(QMainWindow):
         ml.setSpacing(0)
         ml.addWidget(self._build_topbar())
 
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
         self.chat = ChatView()
-        ml.addWidget(self.chat, 1)
-        ml.addWidget(self._build_composer())
+        self.tabs.addTab(self.chat, "Chat")
+        self.editors = EditorTabs(self.tabs, self)
+        self.editors.status.connect(lambda s: self._set_status(s))
+        ml.addWidget(self.tabs, 1)
+        self.composer = self._build_composer()
+        ml.addWidget(self.composer)
+        self.tabs.currentChanged.connect(
+            lambda i: self.composer.setVisible(i == 0))  # composer hanya untuk tab Chat
 
         self.terminal = TerminalPanel(self.session.workspace)
         self.terminal.setVisible(False)
@@ -649,6 +658,7 @@ class MainWindow(QMainWindow):
         self.changes = ChangesPanel(self.session.workspace)
         self.changes.message.connect(self._on_git_message)
         self.changes.files.stateChanged.connect(self._on_tree_state_changed)
+        self.changes.files.fileOpenRequested.connect(self._open_in_editor)
         outer.addWidget(self.changes)
 
         self.setCentralWidget(root)
@@ -656,6 +666,8 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+O"), self, self._choose_workspace)
         QShortcut(QKeySequence("Ctrl+J"), self, self._toggle_terminal)
         QShortcut(QKeySequence("Ctrl+K"), self, lambda: self.search.setFocus())
+        QShortcut(QKeySequence("Ctrl+S"), self, self._save_editor)
+        QShortcut(QKeySequence("Ctrl+W"), self, self._close_editor_tab)
         self._tree_state: dict[str, list[str]] = dict(self.cfg.get("tree_state") or {})
         self._tree_save_timer = QTimer(self)
         self._tree_save_timer.setSingleShot(True)
@@ -1011,6 +1023,20 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             pass
 
+    def _open_in_editor(self, path: str) -> None:
+        ed = self.editors.open_path(path)
+        if ed is not None:
+            self.tabs.setCurrentWidget(ed)
+
+    def _save_editor(self) -> None:
+        if self.editors.current_editor() is not None:
+            self.editors.save()
+
+    def _close_editor_tab(self) -> None:
+        idx = self.tabs.currentIndex()
+        if idx > 0:
+            self.editors.close_tab(idx)
+
     def _on_git_message(self, text: str, ok: bool) -> None:
         self._set_status(text[:80], OK if ok else ERR)
 
@@ -1196,6 +1222,7 @@ class MainWindow(QMainWindow):
             self._set_status("selesaikan/stop dulu")
             return
         self.current_chat = cid
+        self.tabs.setCurrentIndex(0)
         self.title_label.setText((item.text() or "Thread")[:60])
         self.session.set_chat(cid)
         self.session.load(chat.get("messages") or [])
@@ -1427,6 +1454,7 @@ class MainWindow(QMainWindow):
         self._set_status("berpikir 0.0s", WARN)
         self._activity = None
         self._flush_timer.stop()
+        self._tool_args: dict[str, dict] = {}
         self._reason_buf = []
         self._buf = []
         self._tools: dict[str, dict] = {}
@@ -1478,11 +1506,17 @@ class MainWindow(QMainWindow):
                 self._flush_timer.start()
         elif t == "tool_start":
             name = ev.get("name", "?")
+            self._tool_args[str(ev.get("id"))] = ev.get("args") or {}
             self._activity_group().start_tool(
                 ev.get("id"), name, tool_summary(name, ev.get("args") or {}))
             self._scroll()
         elif t == "tool_end":
             name = ev.get("name", "?")
+            done_args = self._tool_args.pop(str(ev.get("id")), {}) if hasattr(self, "_tool_args") else {}
+            if name in ("write_file", "edit_file") and isinstance(done_args, dict):
+                changed = str(done_args.get("path") or "")
+                if changed and getattr(self, "editors", None) is not None:
+                    self.editors.reload_path(changed)
             self._activity_group().end_tool(
                 ev.get("id"), name, bool(ev.get("ok")), ev.get("ms"),
                 str(ev.get("result") or ""))

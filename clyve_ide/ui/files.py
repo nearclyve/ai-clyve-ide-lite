@@ -9,8 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QDir, QModelIndex, QSortFilterProxyModel, QTimer, QUrl, Qt, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QDir, QModelIndex, QSortFilterProxyModel, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QFileSystemModel, QFrame, QHBoxLayout, QLabel, QPushButton, QTreeView,
     QVBoxLayout, QWidget,
@@ -41,7 +40,8 @@ class FilesTree(QFrame):
     workspace dan dipulihkan saat app dibuka atau workspace diganti.
     """
 
-    stateChanged = Signal(list)   # daftar path relatif folder yang terbuka
+    stateChanged = Signal(list)      # daftar path relatif folder yang terbuka
+    fileOpenRequested = Signal(str)  # klik dua kali file -> buka di editor app
 
     def __init__(self, root: str = "", parent=None):
         super().__init__(parent)
@@ -194,4 +194,4 @@ class FilesTree(QFrame):
         src = self.proxy.mapToSource(index)
         path = self.model.filePath(src)
         if path and Path(path).is_file():
-            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+            self.fileOpenRequested.emit(path)
