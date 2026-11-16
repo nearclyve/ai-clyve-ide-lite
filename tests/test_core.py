@@ -302,6 +302,48 @@ class QueueTest(unittest.TestCase):
         self.assertGreater(w.chat.lay.count(), before)
         self.assertIn("selesai", w.status.text())
 
+    def test_short_bubble_follows_text(self):
+        from PySide6.QtCore import Qt
+        w = self.w
+        b = w.chat.add_bubble("user")
+        b.set_stream_text("hallo")
+        self.app.processEvents()
+        self.assertLess(b.width(), 320)
+        b.set_stream_text("jawaban " * 200)
+        self.app.processEvents()
+        self.assertGreater(b.width(), b.minimumWidth())
+
+    def test_streaming_uses_plain_text(self):
+        from PySide6.QtCore import Qt
+        w = self.w
+        w.chat.clear()
+        w._welcome = False
+        w._stream_started = False
+        w._stream_bubble = None
+        w._buf = []
+        w._reason_buf = []
+        w._had_delta = False
+        w._first_delta_at = 0.0
+        w._t0 = time.time()
+        w._on_event({"type": "delta", "text": "halo **dunia**"})
+        w._flush_stream()
+        b = w._stream_bubble
+        self.assertEqual(b.body.textFormat(), Qt.PlainText)
+        self.assertNotIn("<div", b.body.text())
+        w._finalize_stream("")
+        self.assertEqual(b.body.textFormat(), Qt.RichText)
+
+    def test_context_trim_caps_chars(self):
+        import tempfile
+        from clyve_ide.agent import AgentSession
+        s = AgentSession("k", "http://127.0.0.1:9/v1", "m",
+                         tempfile.mkdtemp(prefix="clyve-ctx-"))
+        s.messages.append({"role": "user", "content": "x" * 50_000})
+        s.messages.append({"role": "tool", "content": "y" * 50_000})
+        self.assertGreater(s._context_chars(), 80_000)
+        s._trim()
+        self.assertLessEqual(s._context_chars(), 80_000)
+
     def test_reasoning_shown_then_warns_when_no_answer(self):
         w = self.w
         w.chat.clear()

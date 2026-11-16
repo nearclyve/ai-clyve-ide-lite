@@ -446,6 +446,23 @@ class Bubble(QFrame):
             f"color:{FG};font-size:13.5px;line-height:150%;background:transparent;")
         lay.addWidget(self.body)
 
+    def _apply_wrap(self, plain_len: int) -> None:
+        """Teks pendek jangan di-wrap: QLabel wordWrap membuat lebar jadi sempit
+        (mis. 'Hallo. Was soll ich bauen?' pecah 2 baris di balon 160px)."""
+        self.body.setWordWrap(plain_len > 70)
+
+    def set_stream_text(self, text: str) -> None:
+        """Render streaming sebagai teks polos: tidak ada parsing HTML per flush."""
+        self._apply_wrap(max((len(x) for x in text.splitlines()), default=0))
+        self.body.setTextFormat(Qt.PlainText)
+        self.body.setText(text)
+
+    def set_rich(self, body_html: str) -> None:
+        plain = re.sub(r"<[^>]+>", "", body_html)
+        self._apply_wrap(max((len(x) for x in plain.splitlines()), default=0))
+        self.body.setTextFormat(Qt.RichText)
+        self.body.setText(body_html)
+
 
 class ChatView(QScrollArea):
     """Daftar bubble chat yang bisa discroll, dengan pemisahan kiri/kanan."""
@@ -477,8 +494,11 @@ class ChatView(QScrollArea):
             if widget is not None:
                 widget.setParent(None)
                 widget.deleteLater()
+        # stretch penutup wajib ada lagi: tanpa ini QVBoxLayout membagi sisa
+        # tinggi ke setiap baris sehingga bubble pendek jadi tinggi 300px.
+        self.lay.addStretch(1)
 
-    def _row(self, widget, align_right: bool, follow: bool = True):
+    def _row(self, widget, align_right: bool, follow: bool = True, stretch: bool = True):
         row = QWidget()
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 0, 0, 0)
@@ -486,9 +506,14 @@ class ChatView(QScrollArea):
         if align_right:
             rl.addStretch(1)
             rl.addWidget(widget)
-        else:
+        elif stretch:
+            # widget yang memang harus selebar kolom (grup tool call)
             rl.addWidget(widget, 1)
-        self.lay.addWidget(row)
+        else:
+            # bubble: selebar isinya, bukan selebar kolom
+            rl.addWidget(widget, 0)
+            rl.addStretch(1)
+        self.lay.insertWidget(max(0, self.lay.count() - 1), row)
         if follow:
             self.scroll_bottom(force=True)
         return row
@@ -497,11 +522,14 @@ class ChatView(QScrollArea):
         follow = self._at_bottom()
         bubble = Bubble(role)
         avail = self.viewport().width() or self.width() or 900
-        width = max(360, int(avail * (0.68 if role == "user" else 0.76)))
-        bubble.setMinimumWidth(min(width, 520))
+        width = max(240, int(avail * (0.68 if role == "user" else 0.76)))
+        # dulu minimumWidth dipatok 240-520px sehingga pesan pendek ("hallo")
+        # tetap jadi balon raksasa. Sekarang balon mengikuti lebar isinya,
+        # hanya dibatasi maksimum.
+        bubble.setMinimumWidth(96)
         bubble.setMaximumWidth(width)
-        bubble.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self._row(bubble, align_right=(role == "user"), follow=follow)
+        bubble.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self._row(bubble, align_right=(role == "user"), follow=follow, stretch=False)
         return bubble
 
     def add_widget(self, widget):
@@ -1186,11 +1214,11 @@ class MainWindow(QMainWindow):
     def _append_user(self, text: str):
         bubble = self.chat.add_bubble("user")
         safe = html.escape(text).replace("\n", "<br>")
-        bubble.body.setText(safe)
+        bubble.set_rich(safe)
 
     def _append_bot_html(self, body_html: str, streaming=False) -> Bubble:
         bubble = self.chat.add_bubble("bot")
-        bubble.body.setText(body_html)
+        bubble.set_rich(body_html)
         return bubble
 
     def _activity_group(self) -> ActivityGroup:
@@ -1419,16 +1447,15 @@ class MainWindow(QMainWindow):
             return
         raw = "".join(self._buf)
         if raw.strip():
-            preview = raw if len(raw) <= 20000 else "...\n" + raw[-20000:]
-            bubble.body.setText(
-                f"<div style='white-space:pre-wrap;'>{html.escape(preview)}</div>")
+            preview = raw if len(raw) <= 8000 else "...\n" + raw[-8000:]
+            bubble.set_stream_text(preview)
         else:
             reason = "".join(self._reason_buf)
             if not reason:
                 return
             tail = reason[-600:]
-            bubble.body.setText(
-                f"<span style='color:{MUTED};font-style:italic;font-size:11.5px;'>"
+            bubble.set_rich(
+                f"<span style='color:{MUTED};font-style:italic;font-size:11.5px;'">
                 f"menalar... {html.escape(tail)}</span>")
         self.chat.scroll_bottom()
 
@@ -1442,7 +1469,7 @@ class MainWindow(QMainWindow):
             if bubble is not None and reason:
                 # model reasoning yang berhenti tanpa jawaban akhir (mis. clyve-free)
                 tail = reason[-1200:]
-                bubble.body.setText(
+                bubble.set_rich(
                     f"<span style='color:{WARN}'>Model <b>{html.escape(self.session.model)}</b> "
                     "berhenti setelah menalar tanpa jawaban akhir. Coba kirim ulang "
                     "atau ganti model.</span><br><br>"
@@ -1454,7 +1481,7 @@ class MainWindow(QMainWindow):
             self._reason_buf = []
             return
         if bubble is not None:
-            bubble.body.setText(md_to_html(text))
+            bubble.set_rich(md_to_html(text))
         else:
             self._append_bot_html(md_to_html(text))
         self._stream_started = False

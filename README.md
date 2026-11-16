@@ -97,6 +97,8 @@ Windows: `build_exe.ps1` (butuh Python 3.10+; installer butuh Inno Setup 6:
   default, klik dua kali file untuk membukanya di aplikasi default OS.
 - **Lampiran gambar/PDF** — disimpan di folder config app (bukan di workspace), jadi tidak
   mengotori git; file biner di panel Changes diberi badge `BIN` dan isinya tidak dirender.
+- **Balon chat mengikuti isi** — pesan pendek tidak lagi jadi balon raksasa; teks >70 karakter baru
+  di-wrap ke lebar maksimum kolom.
 - **Status real-time** — topbar menampilkan `berpikir 3.2s` / `membalas 8.1s (tunggu awal 1.2s)`
   / `selesai 9.4s · 3 langkah`, jadi kelihatan apakah lambatnya di model atau di app.
 - **API key milik user sendiri (BYOK)** — dibuka pertama kali, wajib isi key dari akun `ai.clyve.id`.

@@ -451,18 +451,35 @@ class AgentSession:
             yield _sse({"type": "error", "message": f"{type(e).__name__}: {e}"})
 
     def _shrink(self, keep_ratio: float = 0.6) -> None:
-        """Cut context size when the provider stalls or the prompt gets too big."""
-        if len(self.messages) <= 3:
+        """Potong konteks sampai di bawah budget (80k karakter).
+
+        Urutan: potong hasil tool yang panjang, buang pesan lama, lalu potong
+        pesan tunggal yang kebesaran (mis. paste 500 KB). Pesan terakhir selalu
+        dipertahankan supaya instruksi user tidak hilang.
+        """
+        if len(self.messages) < 2:
             return
         head, body = self.messages[0], self.messages[1:]
         for m in body:
             c = m.get("content")
             if m.get("role") == "tool" and isinstance(c, str) and len(c) > 1200:
                 m["content"] = c[:1200] + "\n... (dipotong untuk hemat konteks)"
-        keep = max(6, int(len(body) * keep_ratio))
-        body = body[-keep:]
+
+        total = sum(len(m.get("content") or "") if isinstance(m.get("content"), str) else 0
+                    for m in body)
+        while total > 80_000 and len(body) > 1:
+            gone = body.pop(0)
+            total -= len(gone.get("content") or "")
         while body and body[0].get("role") == "tool":
             body.pop(0)
+        keep = max(6, int(len(body) * keep_ratio))
+        if len(body) > keep:
+            body = body[-keep:]
+        if body:
+            last = body[-1]
+            c = last.get("content")
+            if isinstance(c, str) and len(c) > 60_000:
+                last["content"] = c[:60_000] + "\n... (dipotong untuk hemat konteks)"
         self.messages = [head] + body
 
     def _context_chars(self) -> int:
@@ -476,9 +493,13 @@ class AgentSession:
         return total
 
     def _trim(self) -> None:
-        if len(self.messages) <= HISTORY_LIMIT and self._context_chars() < 200_000:
+        # 80k karakter (~20k token) cukup untuk konteks kerja; makin besar,
+        # TTFT makin lambat (terukur: 60k konteks +0.6s dibanding 0).
+        if len(self.messages) <= HISTORY_LIMIT and self._context_chars() < 80_000:
             return
-        if self._context_chars() >= 200_000:
+        if self._context_chars() >= 80_000:
+            self._shrink(0.6)
+        if self._context_chars() >= 80_000:
             self._shrink(0.5)
         if len(self.messages) <= HISTORY_LIMIT:
             return
