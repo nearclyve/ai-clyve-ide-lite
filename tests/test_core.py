@@ -488,6 +488,16 @@ class QueueTest(unittest.TestCase):
             QMessageBox.question = old_q
         self.assertNotIn("hapusme", [c["id"] for c in server.list_chats()])
 
+    def test_setup_dialog_has_account_links(self):
+        from PySide6.QtWidgets import QPushButton
+        from clyve_ide.qt_app import SetupDialog
+        dlg = SetupDialog()
+        labels = {b.text() for b in dlg.findChildren(QPushButton)}
+        self.assertIn("Daftar akun", labels)
+        self.assertIn("Login", labels)
+        self.assertIn("Ambil API key", labels)
+        self.assertEqual(dlg._site_url(), "https://ai.clyve.id")
+
     def test_update_dialog_shows_release_notes(self):
         from PySide6.QtWidgets import QTextBrowser
         from clyve_ide.qt_app import UpdateDialog

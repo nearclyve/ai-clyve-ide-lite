@@ -13,6 +13,7 @@ import re
 import sys
 import threading
 import time
+import webbrowser
 from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Qt, QThread, QTimer, Signal
@@ -282,7 +283,7 @@ class SetupDialog(QDialog):
         app_name = self.brand.get("app_name") or "AI Clyve IDE Lite"
         self.locked = bool(self.brand.get("lock_base_url") and self.brand.get("base_url"))
         self.setWindowTitle(f"{app_name} - API key")
-        self.resize(460, 240 if self.locked else 330)
+        self.resize(480, 330 if self.locked else 420)
         lay = QVBoxLayout(self)
         title = QLabel("Hubungkan ke Clyve")
         title.setStyleSheet("font-size:17px;font-weight:700;")
@@ -291,6 +292,32 @@ class SetupDialog(QDialog):
         note.setWordWrap(True)
         note.setStyleSheet(f"color:{MUTED};")
         lay.addWidget(note)
+
+        # Jalan pintas untuk user baru: daftar / login / buka dashboard tempat
+        # API key dibuat. Tanpa ini user harus menebak URL-nya sendiri.
+        site = self._site_url()
+        link_note = QLabel("Belum punya key? Buat akun dulu, lalu ambil key di dashboard.")
+        link_note.setWordWrap(True)
+        link_note.setStyleSheet(f"color:{theme.DIM};font-size:11px;")
+        lay.addWidget(link_note)
+        linkrow = QHBoxLayout()
+        linkrow.setSpacing(6)
+        for label, path, tip in (
+            ("Daftar akun", "/register", "Buat akun Clyve AI"),
+            ("Login", "/login", "Masuk ke akun Clyve AI"),
+            ("Ambil API key", "/dashboard", "Buka dashboard tempat API key dibuat"),
+        ):
+            b = QPushButton(label)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setStyleSheet(
+                f"QPushButton{{background:{PANEL2};border:1px solid {LINE};border-radius:7px;"
+                f"color:{MUTED};font-size:11px;padding:5px 10px;}}"
+                f"QPushButton:hover{{color:{FG};border-color:#3d3357;}}")
+            b.setToolTip(f"{tip}: {site}{path}")
+            b.clicked.connect(lambda _=False, url=site + path: webbrowser.open(url))
+            linkrow.addWidget(b)
+        linkrow.addStretch(1)
+        lay.addLayout(linkrow)
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.Password)
         self.key.setPlaceholderText("tempel key di sini")
@@ -312,6 +339,22 @@ class SetupDialog(QDialog):
         btn.setObjectName("primary")
         btn.clicked.connect(self._ok)
         lay.addWidget(btn)
+
+    @staticmethod
+    def _site_url() -> str:
+        """URL website dari base_url API: https://ai.clyve.id/v1 -> https://ai.clyve.id."""
+        base = config.load_brand().get("base_url") or config.DEFAULT_BASE
+        url = str(base).rstrip("/")
+        if url.endswith("/v1"):
+            url = url[:-3]
+        try:
+            from urllib.parse import urlparse
+            p = urlparse(url)
+            if p.scheme and p.netloc:
+                return f"{p.scheme}://{p.netloc}"
+        except Exception:  # noqa: BLE001
+            pass
+        return "https://ai.clyve.id"
 
     def _ok(self):
         key = self.key.text().strip()

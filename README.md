@@ -10,7 +10,8 @@ jalankan terminal, baca PDF/gambar, dan ngoding bareng model Clyve.
 - **Chat list** — sidebar riwayat chat, `+` chat baru, `x` hapus.
 - **Baca file, gambar, PDF, docx/xlsx** — lampiran dibaca otomatis.
 - **Upload maksimal 5 file per pesan** (gambar <= 8 MB, dokumen <= 25 MB).
-- **BYOK** — user isi API key dari akun ai.clyve.id, disimpan lokal.
+- **BYOK** — user isi API key dari akun ai.clyve.id, disimpan lokal. Dialog key punya
+  tombol **Daftar akun**, **Login**, dan **Ambil API key** yang membuka halaman web yang tepat.
 - **Endpoint terkunci** ke `https://ai.clyve.id/v1`, model default `ai-clyve-1`.
 
 ## Install (Windows)
