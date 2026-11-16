@@ -170,14 +170,19 @@ class FilesTree(QFrame):
                     continue
                 if not self.view.isExpanded(idx):
                     continue
+                import os
+                src_path = Path(self.model.filePath(src))
+                rel = ""
+                # realpath me-resolve nama pendek 8.3 (RUNNER~1) dan symlink di
+                # Windows, sehingga perbandingan dengan root tidak meleset.
                 try:
-                    rel = str(Path(self.model.filePath(src)).relative_to(root_path))
+                    real_root = Path(os.path.realpath(str(root_path)))
+                    real_src = Path(os.path.realpath(str(src_path)))
+                    rel = str(real_src.relative_to(real_root))
                 except ValueError:
-                    try:
-                        import os
-                        rel = os.path.relpath(self.model.filePath(src), str(root_path))
-                    except Exception:  # noqa: BLE001
-                        continue
+                    rel = ""
+                if not rel or rel.startswith(".."):
+                    continue
                 expanded.append(rel)
                 walk(idx)
 
