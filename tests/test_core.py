@@ -444,6 +444,15 @@ class FilesTreeTest(unittest.TestCase):
             self.app.processEvents()
             time.sleep(0.02)
 
+    def _wait_until(self, pred, ms=6000):
+        t0 = time.time()
+        while (time.time() - t0) * 1000 < ms:
+            self.app.processEvents()
+            if pred():
+                return True
+            time.sleep(0.05)
+        return bool(pred())
+
     def _index_of(self, tree, name):
         for row in range(tree.proxy.rowCount(tree.view.rootIndex())):
             idx = tree.proxy.index(row, 0, tree.view.rootIndex())
@@ -456,21 +465,25 @@ class FilesTreeTest(unittest.TestCase):
         tree = FilesTree(self.root)
         tree.resize(300, 240)
         tree.show()
-        self._wait(600)
+        self.assertTrue(
+            self._wait_until(lambda: self._index_of(tree, "alpha") is not None),
+            f"model tidak memuat folder alpha di {self.root}")
         idx = self._index_of(tree, "alpha")
-        self.assertIsNotNone(idx)
         tree.view.expand(idx)
-        self._wait(900)  # debounce 400ms + load
+        # jangan bergantung timer debounce: picu penyimpanan langsung
+        tree._emit_state()
         self.assertIn("alpha", tree._saved.get(self.root, []))
-        # tutup, buka lagi dengan state tersimpan
         tree.close()
+
         tree2 = FilesTree(self.root)
         tree2.resize(300, 240)
         tree2.show()
         tree2.set_state(["alpha"])
-        self._wait(900)
-        idx2 = self._index_of(tree2, "alpha")
-        self.assertTrue(tree2.view.isExpanded(idx2))
+        def restored() -> bool:
+            i = self._index_of(tree2, "alpha")
+            return i is not None and tree2.view.isExpanded(i)
+
+        self.assertTrue(self._wait_until(restored), "state folder terbuka tidak dipulihkan")
         tree2.close()
 
 

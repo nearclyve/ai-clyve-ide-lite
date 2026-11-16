@@ -173,7 +173,11 @@ class FilesTree(QFrame):
                 try:
                     rel = str(Path(self.model.filePath(src)).relative_to(root_path))
                 except ValueError:
-                    continue
+                    try:
+                        import os
+                        rel = os.path.relpath(self.model.filePath(src), str(root_path))
+                    except Exception:  # noqa: BLE001
+                        continue
                 expanded.append(rel)
                 walk(idx)
 

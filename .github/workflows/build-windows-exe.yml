@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 env:
   APP_NAME: AIClyveIDELite
@@ -105,6 +106,18 @@ jobs:
           }
           $manifest | ConvertTo-Json | Set-Content "dist/latest.json" -Encoding utf8
           dir dist
+
+      - name: Laporkan kegagalan test sebagai issue
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m unittest discover -s tests -v *> test-output.txt
+          $body = Get-Content test-output.txt -Raw
+          if ($body.Length -gt 60000) { $body = $body.Substring($body.Length - 60000) }
+          gh issue create --title "CI gagal: ${{ github.ref_name }}" --body $body
+          if ($LASTEXITCODE -ne 0) { Write-Host "gagal membuat issue (lanjut)" }
 
       - uses: actions/upload-artifact@v4
         with:
