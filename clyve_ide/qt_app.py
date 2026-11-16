@@ -15,8 +15,9 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QKeySequence, QPalette, QShortcut, QTextCursor
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import (QAction, QColor, QFont, QFontMetrics, QImage, QKeySequence,
+                           QPalette, QShortcut, QTextCursor)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
@@ -93,6 +94,7 @@ class ChatInput(QPlainTextEdit):
     """Input chat: paste gambar (Ctrl+V) + tinggi ikut isi (auto-grow)."""
 
     image_pasted = Signal(object)
+    files_pasted = Signal(list)   # jalur file (mis. copy file gambar di Explorer)
     MIN_H = 46
     MAX_H = 190
 
@@ -124,11 +126,22 @@ class ChatInput(QPlainTextEdit):
     def reset_height(self) -> None:
         self.setFixedHeight(self.MIN_H)
 
+    @staticmethod
+    def _clipboard_files() -> list[str]:
+        md = QApplication.clipboard().mimeData()
+        if md is None or not md.hasUrls():
+            return []
+        return [u.toLocalFile() for u in md.urls() if u.isLocalFile() and u.toLocalFile()]
+
     def keyPressEvent(self, ev):  # noqa: N802
         if ev.matches(QKeySequence.Paste):
             img = QApplication.clipboard().image()
-            if not img.isNull():
+            if img is not None and not img.isNull():
                 self.image_pasted.emit(img)
+                return
+            files = self._clipboard_files()
+            if files:
+                self.files_pasted.emit(files)
                 return
         super().keyPressEvent(ev)
 
@@ -136,8 +149,13 @@ class ChatInput(QPlainTextEdit):
         # Ctrl+V lewat menu/konteks: kalau clipboard berisi gambar, jadikan lampiran.
         if source is not None and source.hasImage():
             img = QApplication.clipboard().image()
-            if not img.isNull():
+            if img is not None and not img.isNull():
                 self.image_pasted.emit(img)
+                return
+        if source is not None and source.hasUrls():
+            files = [u.toLocalFile() for u in source.urls() if u.isLocalFile() and u.toLocalFile()]
+            if files:
+                self.files_pasted.emit(files)
                 return
         super().insertFromMimeData(source)
 
@@ -891,6 +909,7 @@ class MainWindow(QMainWindow):
         self.input = ChatInput()
         self.input.setObjectName("input")
         self.input.image_pasted.connect(self._paste_image)
+        self.input.files_pasted.connect(self._attach_paths)
         self.input.setPlaceholderText("Tulis instruksi...")
         self.input.setFixedHeight(46)
         self.input.setStyleSheet(
@@ -1260,26 +1279,56 @@ class MainWindow(QMainWindow):
                 self._set_status(f"gagal lampirkan: {e}", ERR)
         self._render_atts()
 
+    @staticmethod
+    def _image_png_bytes(img: QImage) -> bytes:
+        """QImage -> PNG bytes di memori.
+
+        Dulu gambar disimpan dulu ke <workspace>/paste_*.png. Kalau workspace
+        di root drive (C:\\) Windows menolak tulis tanpa admin, sehingga
+        paste selalu gagal dengan pesan 'gambar clipboard tidak bisa dibaca'.
+        """
+        ba = QByteArray()
+        buf = QBuffer(ba)
+        buf.open(QIODevice.WriteOnly)
+        if not img.save(buf, "PNG"):
+            raise RuntimeError("gambar clipboard tidak bisa di-encode")
+        buf.close()
+        return bytes(ba)
+
     def _paste_image(self, img):
         """Simpan gambar dari clipboard sebagai lampiran (tanpa perlu simpan manual)."""
         if len(self.attachments) >= attach.MAX_FILES:
             self._set_status(f"maksimal {attach.MAX_FILES} file per pesan", WARN)
             return
+        if img is None or img.isNull():
+            self._set_status(
+                "clipboard tidak berisi gambar. Coba Ctrl+V dari browser/aplikasi gambar, "
+                "atau pakai tombol + untuk lampirkan file.", WARN)
+            return
         try:
-            tmp = Path(self.session.workspace or Path.home()) / f"paste_{int(time.time() * 1000)}.png"
-            tmp.parent.mkdir(parents=True, exist_ok=True)
-            if not img.save(str(tmp), "PNG"):
-                raise RuntimeError("gambar clipboard tidak bisa dibaca")
-            info = attach.save_upload(Path(self.session.workspace or Path.home()), tmp.name, tmp.read_bytes())
+            data = self._image_png_bytes(img)
+            name = f"paste_{int(time.time() * 1000)}.png"
+            info = attach.save_upload(Path(self.session.workspace or Path.home()), name, data)
             self.attachments.append(info)
             self._render_atts()
-            self._set_status(f"gambar ditempel: {info['name']}")
-            try:
-                tmp.unlink()
-            except OSError:
-                pass
+            self._set_status(f"gambar ditempel: {info['name']} ({len(data) // 1024} KB)")
         except Exception as e:  # noqa: BLE001
             self._set_status(f"gagal tempel gambar: {e}", ERR)
+
+    def _attach_paths(self, paths: list[str]) -> None:
+        """Lampirkan file dari clipboard (copy file), tanpa dialog."""
+        for p in paths:
+            if len(self.attachments) >= attach.MAX_FILES:
+                self._set_status(f"maksimal {attach.MAX_FILES} file per pesan", WARN)
+                break
+            try:
+                data = Path(p).read_bytes()
+                info = attach.save_upload(Path(self.session.workspace or Path.home()),
+                                          Path(p).name, data)
+                self.attachments.append(info)
+            except Exception as e:  # noqa: BLE001
+                self._set_status(f"gagal lampirkan {Path(p).name}: {e}", ERR)
+        self._render_atts()
 
     def _render_atts(self):
         while self.att_row.count() > 1:

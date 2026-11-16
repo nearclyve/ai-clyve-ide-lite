@@ -302,6 +302,39 @@ class QueueTest(unittest.TestCase):
         self.assertGreater(w.chat.lay.count(), before)
         self.assertIn("selesai", w.status.text())
 
+    def test_paste_image_works_with_root_workspace(self):
+        from PySide6.QtGui import QColor, QImage
+        w = self.w
+        old_ws = w.session.workspace
+        w.session.workspace = "/"        # dulu: tulis temp ke root -> gagal
+        w.attachments = []
+        img = QImage(10, 10, QImage.Format_RGB32)
+        img.fill(QColor("#ff0000"))
+        w._paste_image(img)
+        self.assertEqual(len(w.attachments), 1)
+        self.assertTrue(Path(w.attachments[0]["path"]).is_file())
+        self.assertIn("gambar ditempel", w.status.text())
+        w.session.workspace = old_ws
+        w.attachments = []
+        w._render_atts()
+
+    def test_paste_null_image_shows_hint(self):
+        w = self.w
+        w.attachments = []
+        w._paste_image(None)
+        self.assertIn("tidak berisi gambar", w.status.text())
+
+    def test_attach_paths_from_file(self):
+        import tempfile
+        w = self.w
+        w.attachments = []
+        p = Path(tempfile.mkdtemp(prefix="clyve-paste-")) / "foto.png"
+        p.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+        w._attach_paths([str(p)])
+        self.assertEqual(len(w.attachments), 1)
+        w.attachments = []
+        w._render_atts()
+
     def test_short_bubble_follows_text(self):
         from PySide6.QtCore import Qt
         w = self.w
