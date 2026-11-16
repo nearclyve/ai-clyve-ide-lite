@@ -134,6 +134,10 @@ Windows: `build_exe.ps1` (butuh Python 3.10+; installer butuh Inno Setup 6:
   / `selesai 9.4s · 3 langkah`, jadi kelihatan apakah lambatnya di model atau di app.
 - **API key milik user sendiri (BYOK)** — dibuka pertama kali, wajib isi key dari akun `ai.clyve.id`.
   Key disimpan lokal di `%APPDATA%\clyve-ide\settings.json`, tidak pernah dikirim ke mana pun selain gateway Clyve.
+- **Akses folder tambahan bisa dicabut** — tiap folder di sidebar tampil sebagai chip
+  dengan tombol `×`; klik untuk mencabut izin (langsung tersimpan di `settings.json`).
+- **Hapus chat** — klik kanan thread → `Hapus chat`, atau pilih thread lalu tekan `Delete`.
+  File chat + checkpoint-nya ikut dihapus; kalau yang dihapus chat aktif, app pindah ke chat baru.
 - **Workspace picker** — pilih folder kerja lewat dialog; semua akses file dibatasi di folder itu.
   Folder default dibuat otomatis (`~/ClyveWorkspace`); memilih root drive (`C:\`) memunculkan
   konfirmasi karena agent akan boleh menyentuh seluruh drive.

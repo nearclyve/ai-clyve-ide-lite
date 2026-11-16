@@ -57,6 +57,26 @@ def save_chat(cid: str, messages: list[dict]) -> None:
     chat_file(cid).write_text(json.dumps(data, ensure_ascii=False, indent=1), "utf-8")
 
 
+def delete_chat(cid: str) -> bool:
+    """Hapus file chat + checkpoint miliknya. Return True kalau file terhapus."""
+    import shutil
+    ok = False
+    p = chat_file(cid)
+    try:
+        if p.exists():
+            p.unlink()
+            ok = True
+    except OSError:
+        return False
+    try:
+        cp = config.config_dir() / "checkpoints" / cid
+        if cp.exists():
+            shutil.rmtree(cp)
+    except Exception:  # noqa: BLE001
+        pass
+    return ok
+
+
 def load_chat(cid: str) -> dict | None:
     p = chat_file(cid)
     if not p.exists():

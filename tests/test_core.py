@@ -60,6 +60,24 @@ class AttachmentsTest(unittest.TestCase):
                 os.environ["XDG_CONFIG_HOME"] = old
 
 
+class ChatDeleteTest(unittest.TestCase):
+    def test_delete_chat_removes_file(self):
+        from clyve_ide import server
+        old = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = tempfile.mkdtemp(prefix="clyve-del-")
+        try:
+            server.save_chat("abc123", [{"role": "user", "content": "halo"}])
+            self.assertTrue(any(c["id"] == "abc123" for c in server.list_chats()))
+            self.assertTrue(server.delete_chat("abc123"))
+            self.assertFalse(any(c["id"] == "abc123" for c in server.list_chats()))
+            self.assertFalse(server.delete_chat("tidak-ada"))
+        finally:
+            if old is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = old
+
+
 class WorkspaceTest(unittest.TestCase):
     def test_root_detection(self):
         import tempfile
@@ -434,6 +452,41 @@ class QueueTest(unittest.TestCase):
             if t.strip():
                 out.append(t)
         return out
+
+    def test_extra_roots_chip_can_be_removed(self):
+        w = self.w
+        w.cfg["extra_roots"] = ["/tmp/proyek-a", "/tmp/proyek-b"]
+        w._render_roots()
+        chips = [w.roots_box.itemAt(i).widget() for i in range(w.roots_box.count())]
+        self.assertEqual(len(chips), 2)
+        self.assertIn("proyek-a", chips[0].text())
+        w._remove_root("/tmp/proyek-a")
+        self.assertEqual(w.cfg["extra_roots"], ["/tmp/proyek-b"])
+        chips = [w.roots_box.itemAt(i).widget() for i in range(w.roots_box.count())]
+        self.assertEqual(len(chips), 1)
+        w.cfg["extra_roots"] = []
+        w._render_roots()
+
+    def test_chat_list_delete_removes_thread(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QMessageBox
+        from clyve_ide import server
+        w = self.w
+        server.save_chat("hapusme", [{"role": "user", "content": "halo"}])
+        w._refresh_history()
+        item = None
+        for i in range(w.history.count()):
+            if w.history.item(i).data(Qt.UserRole) == "hapusme":
+                item = w.history.item(i)
+                break
+        self.assertIsNotNone(item)
+        old_q = QMessageBox.question
+        QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes)
+        try:
+            w._delete_chat(item)
+        finally:
+            QMessageBox.question = old_q
+        self.assertNotIn("hapusme", [c["id"] for c in server.list_chats()])
 
     def test_update_dialog_shows_release_notes(self):
         from PySide6.QtWidgets import QTextBrowser

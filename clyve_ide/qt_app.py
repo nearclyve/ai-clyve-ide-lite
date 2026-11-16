@@ -16,13 +16,13 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import (QAction, QColor, QFont, QFontMetrics, QImage, QKeySequence,
-                           QPalette, QShortcut, QTextCursor)
+from PySide6.QtGui import (QAction, QColor, QFont, QFontMetrics, QImage,
+                           QKeySequence, QPalette, QShortcut, QTextCursor)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
     QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSplitter,
-    QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
+    QTabWidget, QTextBrowser, QVBoxLayout, QWidget, QMenu,
 )
 
 from . import attachments as attach
@@ -31,7 +31,7 @@ from . import gitutil
 from . import stt as stt_mod
 from .agent import AgentSession
 from .checkpoints import CheckpointStore
-from .server import list_chats, load_chat, save_chat
+from .server import delete_chat, list_chats, load_chat, save_chat
 from .ui import theme
 from .ui.activity import ActivityGroup, tool_summary
 from .ui.changes import ChangesPanel
@@ -735,6 +735,9 @@ class MainWindow(QMainWindow):
         pal2.setColor(QPalette.Text, QColor(theme.MUTED))
         self.history.setPalette(pal2)
         self.history.itemClicked.connect(self._open_chat)
+        self.history.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.history.customContextMenuRequested.connect(self._chat_menu)
+        self.history.installEventFilter(self)
         sl.addWidget(self.history, 1)
 
         sl.addWidget(self._divider())
@@ -786,10 +789,13 @@ class MainWindow(QMainWindow):
         acc.addStretch(1)
         sl.addLayout(acc)
 
-        self.roots_label = QLabel("hanya workspace")
-        self.roots_label.setStyleSheet(f"color:{theme.DIM};font-size:10px;")
-        self.roots_label.setWordWrap(True)
-        sl.addWidget(self.roots_label)
+        self.roots_box = QVBoxLayout()
+        self.roots_box.setContentsMargins(0, 0, 0, 0)
+        self.roots_box.setSpacing(2)
+        roots_holder = QWidget()
+        roots_holder.setLayout(self.roots_box)
+        sl.addWidget(roots_holder)
+        self._render_roots()
 
         self.full_access = QCheckBox("Akses seluruh disk")
         self.full_access.setStyleSheet(f"color:{theme.MUTED};font-size:10.5px;spacing:6px;")
@@ -993,6 +999,41 @@ class MainWindow(QMainWindow):
         sep.setStyleSheet(f"background:{theme.LINE};")
         return sep
 
+    def _chat_menu(self, pos) -> None:
+        item = self.history.itemAt(pos)
+        if item is None:
+            return
+        self.history.setCurrentItem(item)
+        menu = QMenu(self)
+        act_open = menu.addAction("Buka chat")
+        act_del = menu.addAction("Hapus chat")
+        chosen = menu.exec(self.history.mapToGlobal(pos))
+        if chosen is act_open:
+            self._open_chat(item)
+        elif chosen is act_del:
+            self._delete_chat(item)
+
+    def _delete_chat(self, item) -> None:
+        cid = item.data(Qt.UserRole)
+        if not cid:
+            return
+        if self.busy and cid == self.current_chat:
+            self._set_status("stop dulu sebelum menghapus chat aktif", WARN)
+            return
+        ans = QMessageBox.question(
+            self, "Hapus chat",
+            f"Hapus chat \"{item.text()}\"?\n\nRiwayat dan checkpoint chat ini "
+            "akan dihapus permanen.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ans != QMessageBox.Yes:
+            return
+        ok = delete_chat(cid)
+        if cid == self.current_chat:
+            self._new_chat()
+        self._refresh_history()
+        self._set_status("chat dihapus" if ok else "chat tidak ditemukan",
+                         OK if ok else ERR)
+
     def _filter_threads(self, text: str) -> None:
         needle = (text or "").strip().lower()
         for i in range(self.history.count()):
@@ -1065,9 +1106,15 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ events
     def eventFilter(self, obj, ev):
         from PySide6.QtCore import QEvent
-        if obj is self.input and ev.type() == QEvent.KeyPress:
+        if obj is getattr(self, "input", None) and ev.type() == QEvent.KeyPress:
             if ev.key() in (Qt.Key_Return, Qt.Key_Enter) and not (ev.modifiers() & Qt.ShiftModifier):
                 self._send()
+                return True
+        if (obj is getattr(self, "history", None) and ev.type() == QEvent.KeyPress
+                and ev.key() == Qt.Key_Delete):
+            item = self.history.currentItem()
+            if item is not None:
+                self._delete_chat(item)
                 return True
         return super().eventFilter(obj, ev)
 
@@ -1174,8 +1221,41 @@ class MainWindow(QMainWindow):
         self._render_roots()
 
     def _render_roots(self):
-        roots = [r for r in (self.cfg.get("extra_roots") or []) if r != self.cfg.get("workspace")]
-        self.roots_label.setText("\n".join(roots) if roots else "hanya workspace")
+        while self.roots_box.count():
+            item = self.roots_box.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+        roots = [r for r in (self.cfg.get("extra_roots") or [])
+                 if r != self.cfg.get("workspace")]
+        if not roots:
+            lab = QLabel("hanya workspace")
+            lab.setStyleSheet(f"color:{theme.DIM};font-size:10px;")
+            self.roots_box.addWidget(lab)
+            return
+        for root in roots:
+            chip = QPushButton()
+            fm = chip.fontMetrics()
+            chip.setText(fm.elidedText(root, Qt.ElideMiddle, 158) + "  \u00d7")
+            chip.setToolTip(f"{root}\nKlik untuk mencabut izin folder ini")
+            chip.setCursor(Qt.PointingHandCursor)
+            chip.setStyleSheet(
+                f"QPushButton{{background:{theme.PANEL2};border:1px solid {theme.LINE};"
+                f"border-radius:5px;color:{theme.MUTED};font-size:9.5px;padding:2px 6px;"
+                f"text-align:left;}}"
+                f"QPushButton:hover{{color:{theme.WARN};border-color:#5c2536;}}")
+            chip.clicked.connect(lambda _=False, path=root: self._remove_root(path))
+            self.roots_box.addWidget(chip)
+
+    def _remove_root(self, path: str) -> None:
+        roots = [r for r in (self.cfg.get("extra_roots") or []) if r != path]
+        self.cfg["extra_roots"] = roots
+        config.save(self.cfg)
+        self.session.set_access(extra_roots=roots,
+                                full_access=bool(self.cfg.get("full_access")))
+        self._render_roots()
+        self._set_status(f"akses dicabut: {Path(path).name}", WARN)
 
     def _toggle_full_access(self, state):
         self.cfg["full_access"] = bool(state)
