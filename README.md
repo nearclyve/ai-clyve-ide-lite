@@ -39,6 +39,22 @@ Update tidak perlu download manual:
 - Update tidak menghapus settings: API key + riwayat chat ada di
   `%APPDATA%\clyve-ide`, di luar folder instalasi.
 
+### Uninstall
+
+**Apps & Features** → `AI Clyve IDE Lite` → Uninstall. Uninstaller menghapus file
+aplikasi, lalu menanyakan:
+
+> Hapus juga data lokal AI Clyve IDE Lite? (API key, riwayat chat, checkpoint, lampiran)
+
+Default **No** — jadi kalau mau install ulang, data tetap ada. Pilih **Yes** untuk
+bersih total. Uninstall senyap (`/VERYSILENT`) tidak menanyakan apa pun dan
+membiarkan data.
+
+Hapus manual kalau perlu:
+```powershell
+Remove-Item -Recurse -Force "$env:APPDATA\clyve-ide"
+```
+
 ## Rilis versi baru (maintainer)
 
 Versi hanya didefinisikan di `clyve_ide/version.py`. Alur rilis:

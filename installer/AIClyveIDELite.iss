@@ -70,5 +70,34 @@ Filename: "{app}\{#AppExe}"; Description: "Jalankan {#AppName}"; Flags: nowait p
 Filename: "{app}\{#AppExe}"; Flags: nowait; Check: WizardSilent
 
 [UninstallDelete]
-; Cache update yang terunduh di temp dibiarkan (OS yang bersihkan).
-; Settings user (%APPDATA%\clyve-ide) sengaja TIDAK dihapus: API key + riwayat chat aman saat reinstall.
+; File aplikasi dihapus otomatis. Data user (%APPDATA%\clyve-ide) TIDAK dihapus
+; default supaya reinstall/upgrade tidak kehilangan chat & API key; uninstaller
+; menanyakan apakah mau dihapus juga (lihat [Code] di bawah).
+
+[Code]
+// Saat uninstall selesai, tawarkan hapus data lokal: settings.json (API key,
+// workspace), chats/, checkpoints/, uploads/. Default tombol = "No" supaya
+// tidak terhapus karena salah pencet. Update aplikasi tidak lewat uninstall,
+// jadi data tetap aman saat update.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  DataDir: String;
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    DataDir := ExpandConstant('{userappdata}\clyve-ide');
+    // Uninstall senyap (otomatis) tidak boleh menggantung menunggu jawaban:
+    // data dibiarkan, user bisa hapus manual.
+    if (not UninstallSilent) and DirExists(DataDir) then
+    begin
+      if MsgBox('Hapus juga data lokal AI Clyve IDE Lite?' + #13#10 + #13#10 +
+                'Termasuk: API key, riwayat chat, checkpoint, dan lampiran.' + #13#10 +
+                'Lokasi: ' + DataDir + #13#10 + #13#10 +
+                'Pilih No kalau mau install ulang tanpa kehilangan data.',
+                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+      begin
+        DelTree(DataDir, True, True, True);
+      end;
+    end;
+  end;
+end;

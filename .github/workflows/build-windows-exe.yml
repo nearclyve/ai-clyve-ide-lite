@@ -84,11 +84,18 @@ jobs:
 
       - name: Build installer
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { throw "ISCC tidak ditemukan" }
-          & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" "installer\AIClyveIDELite.iss"
-          if ($LASTEXITCODE -ne 0) { throw "ISCC gagal" }
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" "installer\AIClyveIDELite.iss" 2>&1 |
+            Tee-Object -FilePath iscc.log
+          if ($LASTEXITCODE -ne 0) {
+            $body = Get-Content iscc.log -Raw
+            gh issue create --title "ISCC gagal: ${{ github.ref_name }}" --body $body
+            throw "ISCC gagal"
+          }
 
           # Nama file stabil: link download di website tidak perlu berubah tiap rilis.
           # .../releases/latest/download/AIClyveIDELite-Setup.exe selalu menunjuk
