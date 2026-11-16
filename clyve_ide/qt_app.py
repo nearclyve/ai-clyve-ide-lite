@@ -573,6 +573,7 @@ class MainWindow(QMainWindow):
         self.showMaximized()
         self._new_chat(first=True)
         self._refresh_models()
+        self._ensure_workspace()
 
     # ------------------------------------------------------------------ build
     def _build(self):
@@ -1006,6 +1007,20 @@ class MainWindow(QMainWindow):
         except Exception as e:  # noqa: BLE001
             self._set_status(f"gagal buka folder: {e}")
 
+    def _ensure_workspace(self) -> None:
+        """Buat folder workspace default kalau belum ada + peringatan root drive."""
+        ws = self.session.workspace
+        try:
+            Path(ws).mkdir(parents=True, exist_ok=True)
+        except Exception as e:  # noqa: BLE001
+            self._set_status(f"workspace tidak bisa dibuat: {e}", ERR)
+            return
+        if config.is_root_path(ws):
+            self._set_status(f"peringatan: workspace {ws} adalah root drive", WARN)
+            self.ws_label.setToolTip(
+                f"{ws}\n\nRoot drive: agent bisa membaca/menulis seluruh drive. "
+                "Sebaiknya pilih folder project.")
+
     def _set_ws_path(self, path: str) -> None:
         """Tampilkan path ter-elide di tengah supaya ekor folder tetap terbaca."""
         self.ws_label.ensurePolished()
@@ -1018,6 +1033,14 @@ class MainWindow(QMainWindow):
         path = QFileDialog.getExistingDirectory(self, "Pilih workspace", self.session.workspace)
         if not path:
             return
+        if config.is_root_path(path):
+            ans = QMessageBox.question(
+                self, "Workspace root drive",
+                f"{path} adalah root drive.\n\nAgent akan boleh membaca dan menulis "
+                "di seluruh drive itu. Yakin mau pakai ini?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if ans != QMessageBox.Yes:
+                return
         self.cfg["workspace"] = path
         config.save(self.cfg)
         self.session.set_workspace(path)

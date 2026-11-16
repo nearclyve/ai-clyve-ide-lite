@@ -102,6 +102,8 @@ Windows: `build_exe.ps1` (butuh Python 3.10+; installer butuh Inno Setup 6:
 - **API key milik user sendiri (BYOK)** — dibuka pertama kali, wajib isi key dari akun `ai.clyve.id`.
   Key disimpan lokal di `%APPDATA%\clyve-ide\settings.json`, tidak pernah dikirim ke mana pun selain gateway Clyve.
 - **Workspace picker** — pilih folder kerja lewat dialog; semua akses file dibatasi di folder itu.
+  Folder default dibuat otomatis (`~/ClyveWorkspace`); memilih root drive (`C:\`) memunculkan
+  konfirmasi karena agent akan boleh menyentuh seluruh drive.
 - **Permission always allow** — tidak ada prompt konfirmasi. Agent langsung eksekusi.
 - **13 tool**: file read/write/edit, list, search regex, shell, SQLite, HTTP, open folder, open URL, system info.
 - **Zero dependency** — hanya stdlib Python. Build `.exe` pun ringan.

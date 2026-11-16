@@ -101,6 +101,19 @@ def save(cfg: dict) -> None:
         pass  # NTFS chmod is a no-op; ACLs are inherited from %APPDATA%
 
 
+def is_root_path(path: str) -> bool:
+    """True kalau path adalah root drive/folder (C:\\ atau /).
+
+    Workspace di root berarti agent boleh menyentuh seluruh disk; ini harus
+    dikonfirmasi, bukan jadi default tanpa sadar.
+    """
+    try:
+        p = Path(path).expanduser().resolve()
+        return p.parent == p
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def mask(key: str) -> str:
     if not key:
         return ""

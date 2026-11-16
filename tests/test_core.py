@@ -60,6 +60,20 @@ class AttachmentsTest(unittest.TestCase):
                 os.environ["XDG_CONFIG_HOME"] = old
 
 
+class WorkspaceTest(unittest.TestCase):
+    def test_root_detection(self):
+        import tempfile
+        from clyve_ide import config
+        self.assertTrue(config.is_root_path("/"))
+        self.assertFalse(config.is_root_path(tempfile.mkdtemp(prefix="clyve-ws-")))
+        self.assertFalse(config.is_root_path("/home"))
+
+    def test_default_workspace_is_not_root(self):
+        from clyve_ide import config
+        cfg = config.load()
+        self.assertFalse(config.is_root_path(cfg["workspace"]))
+
+
 class ProcTest(unittest.TestCase):
     def test_no_window_kwargs_linux(self):
         from clyve_ide import proc
