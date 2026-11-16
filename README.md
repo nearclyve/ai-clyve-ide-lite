@@ -93,8 +93,10 @@ Windows: `build_exe.ps1` (butuh Python 3.10+; installer butuh Inno Setup 6:
 - **Panel Changes** — status git + diff per file dengan nomor baris, commit message langsung
   dari app (`git add -A` + `git commit`). Tombol di topbar atau `Ctrl+Shift+G`.
 - **Terminal interaktif** — panel bawah dengan shell hidup (cwd ikut workspace), `Ctrl+J`.
-- **File tree workspace** — di panel kanan bawah kotak commit, semua folder terlipat
-  default, klik dua kali file untuk membukanya di aplikasi default OS.
+- **File tree workspace** — di panel kanan bawah kotak commit, klik dua kali file untuk
+  membukanya di aplikasi default OS. Folder yang dibuka diingat **per workspace**
+  (`tree_state` di settings.json), jadi tidak terlipat lagi saat app dibuka atau
+  saat pindah workspace dan kembali.
 - **Paste gambar** — `Ctrl+V` menyimpan gambar langsung dari clipboard ke memori
   (tidak lagi menulis file sementara ke workspace, yang gagal kalau workspace di `C:\`);
   copy file gambar di Explorer juga ikut terlampir.

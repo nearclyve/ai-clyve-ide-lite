@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QDir, QModelIndex, QSortFilterProxyModel, QTimer, QUrl, Qt
+from PySide6.QtCore import QDir, QModelIndex, QSortFilterProxyModel, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileSystemModel, QFrame, QHBoxLayout, QLabel, QPushButton, QTreeView,
@@ -34,9 +34,21 @@ class _Filter(QSortFilterProxyModel):
 
 
 class FilesTree(QFrame):
+    """Tree workspace yang mengingat folder mana yang terbuka.
+
+    Sebelumnya `directoryLoaded` selalu memicu collapseAll, jadi setiap folder
+    yang baru di-expand langsung menutup lagi. Sekarang state disimpan per
+    workspace dan dipulihkan saat app dibuka atau workspace diganti.
+    """
+
+    stateChanged = Signal(list)   # daftar path relatif folder yang terbuka
+
     def __init__(self, root: str = "", parent=None):
         super().__init__(parent)
         self.root = root or ""
+        self._saved: dict[str, list[str]] = {}
+        self._pending: set[str] = set()
+        self._first_collapse = True
         self.setObjectName("filesTree")
         self.setStyleSheet(f"QFrame#filesTree{{background:transparent;border:none;}}")
 
@@ -88,9 +100,12 @@ class FilesTree(QFrame):
             self.view.setColumnHidden(col, True)
         lay.addWidget(self.view)
 
-        # model memuat isi folder secara async: lipat ulang setelah data masuk,
-        # kalau tidak folder pertama kadang masih terbuka.
-        self.model.directoryLoaded.connect(lambda _p: self.view.collapseAll())
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(400)
+        self._save_timer.timeout.connect(self._emit_state)
+        self.view.expanded.connect(lambda _i: self._save_timer.start())
+        self.view.collapsed.connect(lambda _i: self._save_timer.start())
 
         if self.root:
             self.set_root(self.root)
@@ -102,8 +117,69 @@ class FilesTree(QFrame):
         self.model.setRootPath(root)
         idx = self.proxy.mapFromSource(self.model.index(root))
         self.view.setRootIndex(idx)
-        self.view.collapseAll()  # default: semua folder terlipat
-        QTimer.singleShot(0, self.view.collapseAll)
+        self._first_collapse = True
+        self._pending = set(self._saved.get(root, []))
+        QTimer.singleShot(0, self._restore_or_collapse)
+
+    # ------------------------------------------------------------- state
+    def set_state(self, paths: list[str]) -> None:
+        """Terapkan state tersimpan untuk root aktif (dipanggil dari config)."""
+        if not self.root:
+            return
+        self._saved[self.root] = [str(p) for p in (paths or [])][:120]
+        self._pending = set(self._saved[self.root])
+        self._first_collapse = False
+        QTimer.singleShot(0, self._restore_or_collapse)
+
+    def _restore_or_collapse(self) -> None:
+        if self._pending:
+            self._restore_next()
+            return
+        if self._first_collapse:
+            self.view.collapseAll()
+            self._first_collapse = False
+
+    def _restore_next(self) -> None:
+        """Buka folder yang tersimpan; index anak baru valid setelah model load."""
+        if not self._pending or not self.root:
+            return
+        root_path = Path(self.root)
+        for rel in list(self._pending):
+            src = self.model.index(str(root_path / rel))
+            if not src.isValid():
+                continue
+            idx = self.proxy.mapFromSource(src)
+            if not idx.isValid():
+                continue
+            self.view.expand(idx)
+            self._pending.discard(rel)
+        if self._pending:
+            QTimer.singleShot(150, self._restore_next)
+
+    def _emit_state(self) -> None:
+        if not self.root:
+            return
+        expanded: list[str] = []
+        root_path = Path(self.root)
+
+        def walk(parent: QModelIndex) -> None:
+            for row in range(self.proxy.rowCount(parent)):
+                idx = self.proxy.index(row, 0, parent)
+                src = self.proxy.mapToSource(idx)
+                if not self.model.isDir(src):
+                    continue
+                if not self.view.isExpanded(idx):
+                    continue
+                try:
+                    rel = str(Path(self.model.filePath(src)).relative_to(root_path))
+                except ValueError:
+                    continue
+                expanded.append(rel)
+                walk(idx)
+
+        walk(self.view.rootIndex())
+        self._saved[self.root] = expanded[:120]
+        self.stateChanged.emit(list(self._saved[self.root]))
 
     def _open(self, index: QModelIndex) -> None:
         src = self.proxy.mapToSource(index)

@@ -426,5 +426,53 @@ class QueueTest(unittest.TestCase):
         self.assertEqual(events[-1]["type"], "done")
 
 
+@unittest.skipUnless(_qt_available(), "PySide6 tidak terpasang")
+class FilesTreeTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+        cls.root = tempfile.mkdtemp(prefix="clyve-tree-")
+        (Path(cls.root) / "alpha" / "sub").mkdir(parents=True)
+        (Path(cls.root) / "alpha" / "file.txt").write_text("x")
+        (Path(cls.root) / "beta").mkdir()
+
+    def _wait(self, ms=800):
+        t0 = time.time()
+        while (time.time() - t0) * 1000 < ms:
+            self.app.processEvents()
+            time.sleep(0.02)
+
+    def _index_of(self, tree, name):
+        for row in range(tree.proxy.rowCount(tree.view.rootIndex())):
+            idx = tree.proxy.index(row, 0, tree.view.rootIndex())
+            if tree.proxy.data(idx) == name:
+                return idx
+        return None
+
+    def test_expand_persists_across_reopen(self):
+        from clyve_ide.ui.files import FilesTree
+        tree = FilesTree(self.root)
+        tree.resize(300, 240)
+        tree.show()
+        self._wait(600)
+        idx = self._index_of(tree, "alpha")
+        self.assertIsNotNone(idx)
+        tree.view.expand(idx)
+        self._wait(900)  # debounce 400ms + load
+        self.assertIn("alpha", tree._saved.get(self.root, []))
+        # tutup, buka lagi dengan state tersimpan
+        tree.close()
+        tree2 = FilesTree(self.root)
+        tree2.resize(300, 240)
+        tree2.show()
+        tree2.set_state(["alpha"])
+        self._wait(900)
+        idx2 = self._index_of(tree2, "alpha")
+        self.assertTrue(tree2.view.isExpanded(idx2))
+        tree2.close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

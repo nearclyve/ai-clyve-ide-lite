@@ -648,6 +648,7 @@ class MainWindow(QMainWindow):
 
         self.changes = ChangesPanel(self.session.workspace)
         self.changes.message.connect(self._on_git_message)
+        self.changes.files.stateChanged.connect(self._on_tree_state_changed)
         outer.addWidget(self.changes)
 
         self.setCentralWidget(root)
@@ -655,6 +656,13 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+O"), self, self._choose_workspace)
         QShortcut(QKeySequence("Ctrl+J"), self, self._toggle_terminal)
         QShortcut(QKeySequence("Ctrl+K"), self, lambda: self.search.setFocus())
+        self._tree_state: dict[str, list[str]] = dict(self.cfg.get("tree_state") or {})
+        self._tree_save_timer = QTimer(self)
+        self._tree_save_timer.setSingleShot(True)
+        self._tree_save_timer.setInterval(800)
+        self._tree_save_timer.timeout.connect(self._save_tree_state)
+        QTimer.singleShot(0, lambda: self.changes.files.set_state(
+            self._tree_state.get(self.cfg["workspace"], [])))
         QTimer.singleShot(250, self.changes.refresh)
         # cek update otomatis hanya untuk build terpasang (.exe), bukan `python app.py`
         if getattr(sys, "frozen", False):
@@ -991,6 +999,18 @@ class MainWindow(QMainWindow):
                         or self.terminal.proc.state() == self.terminal.proc.NotRunning):
             self.terminal.start()
 
+    def _on_tree_state_changed(self, paths: list[str]) -> None:
+        ws = self.cfg.get("workspace") or ""
+        self._tree_state[ws] = list(paths)
+        self._tree_save_timer.start()
+
+    def _save_tree_state(self) -> None:
+        self.cfg["tree_state"] = self._tree_state
+        try:
+            config.save(self.cfg)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _on_git_message(self, text: str, ok: bool) -> None:
         self._set_status(text[:80], OK if ok else ERR)
 
@@ -1095,6 +1115,7 @@ class MainWindow(QMainWindow):
         self.ws_badge.setText(Path(path).name or "workspace")
         if getattr(self, "changes", None) is not None:
             self.changes.set_root(path)
+            self.changes.files.set_state(self._tree_state.get(path, []))
         if getattr(self, "terminal", None) is not None:
             self.terminal.set_cwd(path)
 
