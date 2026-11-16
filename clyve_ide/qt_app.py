@@ -36,6 +36,7 @@ from .ui import theme
 from .ui.activity import ActivityGroup, tool_summary
 from .ui.changes import ChangesPanel
 from .ui.editor import EditorTabs
+from .ui.quickopen import QuickOpenDialog
 from .ui.terminal import TerminalPanel
 from .version import __version__
 
@@ -659,6 +660,7 @@ class MainWindow(QMainWindow):
         self.changes.message.connect(self._on_git_message)
         self.changes.files.stateChanged.connect(self._on_tree_state_changed)
         self.changes.files.fileOpenRequested.connect(self._open_in_editor)
+        self.changes.files.searchRequested.connect(self._quick_open)
         outer.addWidget(self.changes)
 
         self.setCentralWidget(root)
@@ -666,6 +668,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+O"), self, self._choose_workspace)
         QShortcut(QKeySequence("Ctrl+J"), self, self._toggle_terminal)
         QShortcut(QKeySequence("Ctrl+K"), self, lambda: self.search.setFocus())
+        QShortcut(QKeySequence("Ctrl+P"), self, self._quick_open)
         QShortcut(QKeySequence("Ctrl+S"), self, self._save_editor)
         QShortcut(QKeySequence("Ctrl+W"), self, self._close_editor_tab)
         self._tree_state: dict[str, list[str]] = dict(self.cfg.get("tree_state") or {})
@@ -1022,6 +1025,19 @@ class MainWindow(QMainWindow):
             config.save(self.cfg)
         except Exception:  # noqa: BLE001
             pass
+
+    def _quick_open(self) -> None:
+        """Ctrl+P: cari file di workspace (indeks di-cache 60 detik)."""
+        ws = self.session.workspace
+        if not getattr(self, "_file_index", None):
+            self._file_index: dict[str, tuple[float, list[str]]] = {}
+        ts, files = self._file_index.get(ws, (0.0, []))
+        fresh = files if (time.time() - ts) < 60 else None
+        dlg = QuickOpenDialog(ws, fresh, self)
+        if dlg.exec() == QDialog.Accepted and dlg.selected_path:
+            self._open_in_editor(dlg.selected_path)
+        if dlg.files:
+            self._file_index[ws] = (time.time(), list(dlg.files))
 
     def _open_in_editor(self, path: str) -> None:
         ed = self.editors.open_path(path)

@@ -446,6 +446,57 @@ class QueueTest(unittest.TestCase):
 
 
 @unittest.skipUnless(_qt_available(), "PySide6 tidak terpasang")
+class QuickOpenTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_fuzzy_score(self):
+        from clyve_ide.ui.quickopen import fuzzy_score
+        self.assertGreater(fuzzy_score("gitu", "clyve_ide/gitutil.py"),
+                           fuzzy_score("gitu", "web/app.js"))
+        self.assertGreater(fuzzy_score("ctrl", "app/Http/Controllers/Emotla/Controller.php"), 0)
+        self.assertEqual(fuzzy_score("zzz", "clyve_ide/gitutil.py"), 0)
+        self.assertGreater(fuzzy_score("", "apa/saja.py"), 0)
+
+    def test_scan_skips_heavy_dirs(self):
+        import tempfile
+        from clyve_ide.ui.quickopen import ScanWorker
+        root = Path(tempfile.mkdtemp(prefix="clyve-scan-"))
+        (root / "app" / "Http").mkdir(parents=True)
+        (root / "app" / "Http" / "Controller.php").write_text("x")
+        (root / "node_modules" / "lib").mkdir(parents=True)
+        (root / "node_modules" / "lib" / "index.js").write_text("x")
+        (root / ".git").mkdir()
+        (root / ".git" / "config").write_text("x")
+        (root / ".github" / "workflows").mkdir(parents=True)
+        (root / ".github" / "workflows" / "ci.yml").write_text("x")
+        w = ScanWorker(str(root))
+        got = []
+        w.done.connect(got.extend)
+        w.run()
+        self.app.processEvents()
+        self.assertIn("app/Http/Controller.php", got)
+        self.assertFalse(any("node_modules" in g for g in got))
+        self.assertFalse(any(g.startswith(".git/") for g in got))
+        self.assertIn(".github/workflows/ci.yml", got)
+
+    def test_dialog_filters_and_selects(self):
+        import tempfile
+        from clyve_ide.ui.quickopen import QuickOpenDialog
+        root = tempfile.mkdtemp(prefix="clyve-qo-")
+        dlg = QuickOpenDialog(root, files=["app/Http/Controller.php", "web/app.js", "README.md"])
+        dlg.input.setText("controller")
+        self.app.processEvents()
+        self.assertGreater(dlg.list.count(), 0)
+        self.assertIn("Controller.php", dlg.list.item(0).text())
+        dlg._accept_current()
+        self.assertTrue(dlg.selected_path.endswith("Controller.php"))
+
+
+@unittest.skipUnless(_qt_available(), "PySide6 tidak terpasang")
 class EditorTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

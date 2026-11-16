@@ -17,8 +17,9 @@ from PySide6.QtWidgets import (
 
 from . import theme
 
-HIDDEN = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build",
-          ".idea", ".vscode", ".next", ".nuxt", "target"}
+HIDDEN = {".git", ".hg", ".svn", "node_modules", ".venv", "venv", "__pycache__",
+          "dist", "build", ".idea", ".vscode", ".next", ".nuxt", "target",
+          ".pytest_cache", ".mypy_cache", ".cache"}
 
 
 class _Filter(QSortFilterProxyModel):
@@ -42,6 +43,7 @@ class FilesTree(QFrame):
 
     stateChanged = Signal(list)      # daftar path relatif folder yang terbuka
     fileOpenRequested = Signal(str)  # klik dua kali file -> buka di editor app
+    searchRequested = Signal()       # tombol cari / Ctrl+P
 
     def __init__(self, root: str = "", parent=None):
         super().__init__(parent)
@@ -63,6 +65,15 @@ class FilesTree(QFrame):
                             f"letter-spacing:1px;")
         head.addWidget(title)
         head.addStretch(1)
+        self.search_btn = QPushButton("\u2315")
+        self.search_btn.setObjectName("ghost")
+        self.search_btn.setFixedWidth(22)
+        self.search_btn.setToolTip("Cari file di workspace (Ctrl+P)")
+        self.search_btn.setStyleSheet(
+            f"QPushButton{{background:transparent;border:none;color:{theme.DIM};font-size:12px;}}"
+            f"QPushButton:hover{{color:{theme.FG};}}")
+        self.search_btn.clicked.connect(lambda: self.searchRequested.emit())
+        head.addWidget(self.search_btn)
         self.collapse_btn = QPushButton("\u25b4")
         self.collapse_btn.setObjectName("ghost")
         self.collapse_btn.setFixedWidth(22)
