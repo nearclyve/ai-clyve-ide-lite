@@ -14,13 +14,19 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (
-    QDialog, QLineEdit, QListWidget, QListWidgetItem, QVBoxLayout,
+    QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QPushButton, QVBoxLayout,
 )
 
 from . import theme
 from .files import HIDDEN
 
 MAX_FILES = 20_000
+# Folder yang tidak berguna untuk "buka file": dependency & artefak build.
+SCAN_SKIP = HIDDEN | {"vendor", "storage/framework", ".git",
+                      "Windows", "Program Files", "Program Files (x86)",
+                      "ProgramData", "$Recycle.Bin", "System Volume Information",
+                      "Recovery", "PerfLogs"}
 MAX_RESULTS = 120
 CACHE_SECONDS = 60
 
@@ -67,7 +73,7 @@ class ScanWorker(QThread):
         try:
             for dirpath, dirnames, filenames in os.walk(root):
                 # Hanya folder berat yang dilewati; .github/.env tetap bisa dicari.
-                dirnames[:] = [d for d in dirnames if d not in HIDDEN]
+                dirnames[:] = [d for d in dirnames if d not in SCAN_SKIP]
                 for f in filenames:
                     full = os.path.join(dirpath, f)
                     rel = os.path.relpath(full, root).replace("\\", "/")
@@ -93,7 +99,7 @@ class QuickOpenDialog(QDialog):
         self.worker: ScanWorker | None = None
         self.setWindowTitle("Cari file")
         self.resize(720, 460)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.setModal(True)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 12, 12, 12)
@@ -115,12 +121,18 @@ class QuickOpenDialog(QDialog):
         self.list.itemActivated.connect(lambda _i: self._accept_current())
         lay.addWidget(self.list, 1)
 
-        self.hint = QLineEdit()
-        self.hint.setReadOnly(True)
-        self.hint.setStyleSheet(f"QLineEdit{{background:transparent;border:none;"
-                                f"color:{theme.DIM};font-size:10.5px;}}")
-        self.hint.setText("memuat indeks file...")
-        lay.addWidget(self.hint)
+        foot = QHBoxLayout()
+        foot.setSpacing(6)
+        self.hint = QLabel("memuat indeks file...")
+        self.hint.setStyleSheet(f"color:{theme.DIM};font-size:10.5px;")
+        foot.addWidget(self.hint)
+        foot.addStretch(1)
+        self.close_btn = QPushButton("Tutup")
+        self.close_btn.setObjectName("ghost")
+        self.close_btn.setToolTip("Tutup (Esc)")
+        self.close_btn.clicked.connect(self.reject)
+        foot.addWidget(self.close_btn)
+        lay.addLayout(foot)
 
         if self.files:
             self._refresh()
@@ -152,7 +164,7 @@ class QuickOpenDialog(QDialog):
         if self.list.count():
             self.list.setCurrentRow(0)
         if not self.files:
-            self.hint.setText("memuat indeks file...")
+            self.hint.setText("memuat indeks file...  (bisa ditutup kapan saja)")
         elif scored:
             self.hint.setText(f"{len(scored)} cocok dari {len(self.files)} file"
                               + (f" (menampilkan {MAX_RESULTS})" if len(scored) > MAX_RESULTS else ""))
@@ -181,7 +193,37 @@ class QuickOpenDialog(QDialog):
         self.selected_path = str(Path(self.workspace) / rel)
         self.accept()
 
-    def closeEvent(self, ev):  # noqa: N802
+    # ------------------------------------------------------------ close aman
+    def _stop_worker(self) -> None:
+        """Hentikan scan sebelum dialog dihancurkan.
+
+        Tanpa ini QThread masih berjalan saat objeknya dihapus -> Qt abort
+        ("QThread: Destroyed while thread is still running") dan app terlihat
+        hang / tidak bisa ditutup di workspace besar.
+        """
         if self.worker is not None and self.worker.isRunning():
+            from PySide6.QtWidgets import QApplication
             self.worker.cancel = True
+            deadline = time.time() + 3.0
+            # tunggu sambil tetap memproses event supaya window tidak "not responding"
+            while self.worker.isRunning() and time.time() < deadline:
+                QApplication.processEvents()
+                self.worker.wait(50)
+
+    def reject(self) -> None:
+        self._stop_worker()
+        super().reject()
+
+    def accept(self) -> None:
+        self._stop_worker()
+        super().accept()
+
+    def closeEvent(self, ev):  # noqa: N802
+        self._stop_worker()
         super().closeEvent(ev)
+
+    def keyPressEvent(self, ev):  # noqa: N802
+        if ev.key() == Qt.Key_Escape:
+            self.reject()
+            return
+        super().keyPressEvent(ev)

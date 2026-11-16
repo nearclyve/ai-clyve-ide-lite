@@ -494,6 +494,22 @@ class QuickOpenTest(unittest.TestCase):
         self.assertFalse(any(g.startswith(".git/") for g in got))
         self.assertIn(".github/workflows/ci.yml", got)
 
+    def test_escape_and_button_close_dialog(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        import tempfile
+        from clyve_ide.ui.quickopen import QuickOpenDialog
+        root = tempfile.mkdtemp(prefix="clyve-qo2-")
+        dlg = QuickOpenDialog(root, files=["a.py"])
+        dlg.show()
+        QTest.keyClick(dlg, Qt.Key_Escape)
+        self.assertFalse(dlg.isVisible())
+        dlg2 = QuickOpenDialog(root, files=["a.py"])
+        dlg2.show()
+        self.assertTrue(dlg2.close_btn.isVisible())
+        dlg2.close_btn.click()
+        self.assertFalse(dlg2.isVisible())
+
     def test_dialog_filters_and_selects(self):
         import tempfile
         from clyve_ide.ui.quickopen import QuickOpenDialog

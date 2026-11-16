@@ -109,7 +109,8 @@ Windows: `build_exe.ps1` (butuh Python 3.10+; installer butuh Inno Setup 6:
 - **Panel Changes** — status git + diff per file dengan nomor baris, commit message langsung
   dari app (`git add -A` + `git commit`). Tombol di topbar atau `Ctrl+Shift+G`.
 - **Terminal interaktif** — panel bawah dengan shell hidup (cwd ikut workspace), `Ctrl+J`.
-- **Quick Open `Ctrl+P`** — cari file di workspace dengan fuzzy match (`gitu` → `clyve_ide/gitutil.py`),
+- **Quick Open `Ctrl+P`** — tutup dengan `Esc` / tombol Tutup (scan dibatalkan dengan aman
+  meski workspace besar); folder `vendor`, `Windows`, `Program Files` tidak di-scan. cari file di workspace dengan fuzzy match (`gitu` → `clyve_ide/gitutil.py`),
   indeks di-cache 60 detik, folder berat (`node_modules`, `.git`, `__pycache__`) dilewati.
   Tombol kaca pembesar di header Workspace membuka dialog yang sama; Enter membuka di tab editor.
 - **Editor file bawaan** — klik dua kali file di tree workspace → tab editor (nomor baris,
