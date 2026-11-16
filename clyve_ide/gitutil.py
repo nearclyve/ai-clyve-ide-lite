@@ -43,7 +43,12 @@ def status(root: str | Path) -> list[dict]:
     """Daftar file berubah: [{path, code, staged, untracked}] — code gaya `git status --porcelain`."""
     if not is_repo(root):
         return []
-    rc, out, _ = _git(root, "status", "--porcelain=v1", "-z", "-uall")
+    # -unormal (bukan -uall): folder untracked dilaporkan sebagai satu entri
+    # ("vendor/") bukan ribuan file. Tanpa ini, workspace Laravel dengan vendor
+    # + node_modules membuat `git status` berjalan lama dan UI ikut membeku.
+    rc, out, _ = _git(root, "status", "--porcelain=v1", "-z", "-unormal", "--",
+                      ".", ":(exclude)vendor", ":(exclude)node_modules",
+                      ":(exclude).venv", ":(exclude)dist", ":(exclude)build")
     if rc != 0:
         return []
     items: list[dict] = []

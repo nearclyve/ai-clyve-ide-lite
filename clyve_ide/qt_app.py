@@ -1636,6 +1636,8 @@ class MainWindow(QMainWindow):
         # saat interpreter keluar (warning "Destroyed while process is running").
         if getattr(self, "terminal", None) is not None:
             self.terminal.stop()
+        if getattr(self, "changes", None) is not None:
+            self.changes.stop()
         super().closeEvent(ev)
 
     # ------------------------------------------------------------------ update

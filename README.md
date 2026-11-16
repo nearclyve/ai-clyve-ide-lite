@@ -106,7 +106,9 @@ Windows: `build_exe.ps1` (butuh Python 3.10+; installer butuh Inno Setup 6:
   `Working · N` (satu baris per tool: ikon, argumen, durasi, output mentah bisa dibuka).
 - **Antrian pesan** — kirim pesan saat agent masih membalas, pesan masuk antrian
   (chip di atas input, klik `×` untuk batal) dan terkirim otomatis begitu giliran selesai.
-- **Panel Changes** — status git + diff per file dengan nomor baris, commit message langsung
+- **Panel Changes** — status git dihitung di background (ganti workspace / repo besar tidak
+  lagi "Not Responding"); `vendor`, `node_modules`, `.venv`, `dist`, `build` tidak di-scan,
+  dan folder untracked tampil satu entri (`assets/`) bukan ribuan file. Detail: diff per file dengan nomor baris, commit message langsung
   dari app (`git add -A` + `git commit`). Tombol di topbar atau `Ctrl+Shift+G`.
 - **Terminal interaktif** — panel bawah dengan shell hidup (cwd ikut workspace), `Ctrl+J`.
 - **Quick Open `Ctrl+P`** — tutup dengan `Esc` / tombol Tutup (scan dibatalkan dengan aman

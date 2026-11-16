@@ -215,6 +215,17 @@ class GitUtilTest(unittest.TestCase):
         self.assertTrue(rows["gambar.png"]["binary"])
         self.assertFalse(gitutil.looks_binary(self.dir, "a.txt"))
 
+    def test_untracked_dir_collapsed(self):
+        (self.dir / "assets").mkdir(parents=True)
+        (self.dir / "assets" / "a.js").write_text("x")
+        (self.dir / "assets" / "b.js").write_text("x")
+        (self.dir / "vendor" / "lib").mkdir(parents=True)
+        (self.dir / "vendor" / "lib" / "c.js").write_text("x")
+        paths = [r["path"] for r in gitutil.status(self.dir)]
+        self.assertIn("assets/", paths)                       # -unormal: satu entri
+        self.assertFalse(any(p.startswith("assets/") and p != "assets/" for p in paths))
+        self.assertFalse(any(p.startswith("vendor") for p in paths))  # vendor dikecualikan
+
     def test_commit_rejects_empty_message(self):
         ok, msg = gitutil.commit(self.dir, "   ")
         self.assertFalse(ok)
@@ -454,6 +465,44 @@ class QueueTest(unittest.TestCase):
         self.assertEqual("".join(deltas), "abcdefghij" * 4)
         self.assertLess(len(deltas), 40)
         self.assertEqual(events[-1]["type"], "done")
+
+
+@unittest.skipUnless(_qt_available(), "PySide6 tidak terpasang")
+class ChangesPanelTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+        cls.root = Path(tempfile.mkdtemp(prefix="clyve-chg-"))
+        subprocess.run(["git", "init", "-q"], cwd=cls.root, check=True)
+        subprocess.run(["git", "config", "user.email", "t@t.t"], cwd=cls.root)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=cls.root)
+        (cls.root / "a.txt").write_text("satu\n")
+        subprocess.run(["git", "add", "-A"], cwd=cls.root)
+        subprocess.run(["git", "commit", "-qm", "init"], cwd=cls.root)
+        (cls.root / "a.txt").write_text("satu\ndua\n")
+
+    def _wait(self, pred, ms=5000):
+        t0 = time.time()
+        while (time.time() - t0) * 1000 < ms:
+            self.app.processEvents()
+            if pred():
+                return True
+            time.sleep(0.02)
+        return pred()
+
+    def test_refresh_is_async_and_fills_rows(self):
+        from clyve_ide.ui.changes import ChangesPanel
+        panel = ChangesPanel(str(self.root))
+        panel.show()
+        panel.refresh()
+        self.assertEqual(panel.count.text(), "\u2026")  # belum memblokir UI
+        self.assertTrue(self._wait(lambda: panel.count.text() == "1"),
+                        f"status tidak selesai: {panel.count.text()}")
+        self.assertEqual(len(panel._blocks), 1)
+        panel.stop()
+        panel.close()
 
 
 @unittest.skipUnless(_qt_available(), "PySide6 tidak terpasang")

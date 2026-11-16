@@ -7,8 +7,9 @@ kalau git tidak ada atau workspace bukan repo.
 from __future__ import annotations
 
 import html
+import time
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
@@ -171,6 +172,31 @@ class FileBlock(QWidget):
         self.view.setVisible(open_it)
 
 
+class _StatusWorker(QThread):
+    """Hitung status git di thread terpisah.
+
+    `git status`/`git diff` pada repo besar bisa makan detik-an (vendor,
+    node_modules). Dulu dipanggil langsung di UI thread saat ganti workspace,
+    sehingga app "Not Responding".
+    """
+
+    done = Signal(str, list, str, bool)
+
+    def __init__(self, root: str, parent=None):
+        super().__init__(parent)
+        self.root = root
+
+    def run(self):
+        root = self.root
+        try:
+            rows = gitutil.files_with_diff(root) if root else []
+            branch = gitutil.branch(root) if root else ""
+            repo = gitutil.is_repo(root) if root else False
+        except Exception:  # noqa: BLE001
+            rows, branch, repo = [], "", False
+        self.done.emit(root, rows, branch, repo)
+
+
 class ChangesPanel(QFrame):
     """Kolom kanan: daftar perubahan + commit."""
 
@@ -183,6 +209,7 @@ class ChangesPanel(QFrame):
         self.setFixedWidth(344)
         self.root = root
         self._blocks: list[FileBlock] = []
+        self._worker: _StatusWorker | None = None
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -255,6 +282,23 @@ class ChangesPanel(QFrame):
         self.refresh()
 
     def refresh(self) -> None:
+        """Mulai hitung status git di background; UI tidak diblokir."""
+        self._clear_blocks()
+        self._loading_root = self.root
+        self.count.setText("\u2026")
+        self.empty = QLabel("memuat status git...")
+        self.empty.setStyleSheet(f"color:{theme.DIM};font-size:11px;padding:14px 8px;")
+        self.empty.setWordWrap(True)
+        self.inner_lay.insertWidget(0, self.empty)
+        if not self.root:
+            self.count.setText("0")
+            self.empty.setText("Pilih workspace dulu.")
+            return
+        self._worker = _StatusWorker(self.root, self)
+        self._worker.done.connect(self._on_status)
+        self._worker.start()
+
+    def _clear_blocks(self) -> None:
         while self.inner_lay.count() > 1:  # sisakan stretch terakhir
             item = self.inner_lay.takeAt(0)
             w = item.widget()
@@ -262,11 +306,15 @@ class ChangesPanel(QFrame):
                 w.setParent(None)
                 w.deleteLater()
         self._blocks = []
-        rows = gitutil.files_with_diff(self.root) if self.root else []
+
+    def _on_status(self, root: str, rows: list, branch: str, repo: bool) -> None:
+        if root != self.root:      # hasil dari workspace lama, buang
+            return
+        self._clear_blocks()
         self.count.setText(str(len(rows)))
-        self.branch.setText(gitutil.branch(self.root) if self.root else "")
+        self.branch.setText(branch)
         if not rows:
-            self.empty = QLabel("Tidak ada perubahan." if gitutil.is_repo(self.root)
+            self.empty = QLabel("Tidak ada perubahan." if repo
                                 else "Workspace ini bukan repo git.")
             self.empty.setStyleSheet(f"color:{theme.DIM};font-size:11px;padding:14px 8px;")
             self.empty.setWordWrap(True)
@@ -283,6 +331,16 @@ class ChangesPanel(QFrame):
             more.setStyleSheet(f"color:{theme.DIM};font-size:10.5px;padding:4px 6px;")
             self.inner_lay.insertWidget(self.inner_lay.count() - 1, more)
         self.refreshed.emit(len(rows))
+
+    def stop(self) -> None:
+        """Hentikan worker sebelum panel dihancurkan (hindari QThread abort)."""
+        w = getattr(self, "_worker", None)
+        if w is not None and w.isRunning():
+            from PySide6.QtWidgets import QApplication
+            deadline = time.time() + 2.0
+            while w.isRunning() and time.time() < deadline:
+                QApplication.processEvents()
+                w.wait(50)
 
     def commit(self) -> None:
         ok, msg = gitutil.commit(self.root, self.msg.text())
