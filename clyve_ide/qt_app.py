@@ -1726,15 +1726,29 @@ class UpdateDialog(QDialog):
         title = QLabel(f"Versi {info.get('version')} tersedia")
         title.setStyleSheet("font-size:16px;font-weight:700;")
         lay.addWidget(title)
-        sub = QLabel(f"Versi terpasang: {__version__}. Update diunduh, dipasang, "
-                     "lalu app dibuka lagi otomatis.")
+        size_mb = (int(info.get("size") or 0)) / 1048576
+        bits = [f"versi terpasang {__version__}"]
+        if size_mb:
+            bits.append(f"{size_mb:.1f} MB")
+        if info.get("published"):
+            bits.append(str(info["published"])[:10])
+        sub = QLabel("  \u00b7  ".join(bits))
         sub.setWordWrap(True)
         sub.setStyleSheet(f"color:{theme.MUTED};font-size:11.5px;")
         lay.addWidget(sub)
+
+        head = QLabel("Catatan rilis")
+        head.setStyleSheet(f"color:{theme.DIM};font-size:9.5px;font-weight:700;"
+                           f"letter-spacing:1px;")
+        lay.addWidget(head)
         notes = QTextBrowser()
         notes.setStyleSheet(f"QTextBrowser{{background:{theme.CODE_BG};border:1px solid {theme.LINE};"
                             f"border-radius:8px;padding:8px;color:{theme.MUTED};font-size:11px;}}")
-        notes.setPlainText(info.get("notes") or "(tidak ada catatan rilis)")
+        text = (info.get("notes") or "").strip()
+        if not text or text.lower().startswith("lihat catatan rilis"):
+            text = ("Rilis ini tidak menyertakan catatan rilis.\n"
+                    "Detail lengkap ada di halaman GitHub Releases.")
+        notes.setPlainText(text)
         lay.addWidget(notes, 1)
         self.progress = QLabel("")
         self.progress.setStyleSheet(f"color:{theme.MUTED};font-size:11px;")

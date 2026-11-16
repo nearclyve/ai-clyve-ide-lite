@@ -247,6 +247,10 @@ kalau build manual). Contoh ada di `brand.example.json`:
 }
 ```
 
+Dialog update menampilkan **catatan rilis** (commit sejak tag sebelumnya, ditulis
+ke `latest.json` oleh CI saat build), plus versi terpasang, ukuran unduhan, dan
+tanggal rilis.
+
 Updater memakai **manifest rilis** (`releases/latest/download/latest.json`) lebih dulu,
 baru fallback ke GitHub API. Manifest dilayani `github.com` (tanpa kuota 60 request/jam),
 jadi "HTTP 403 rate limit" di api.github.com tidak lagi memblokir update.

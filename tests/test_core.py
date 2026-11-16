@@ -424,6 +424,17 @@ class QueueTest(unittest.TestCase):
                 out.append(t)
         return out
 
+    def test_update_dialog_shows_release_notes(self):
+        from PySide6.QtWidgets import QTextBrowser
+        from clyve_ide.qt_app import UpdateDialog
+        info = {"version": "9.9.9", "url": "https://x/Setup.exe",
+                "notes": "- feat: tambah editor\n- fix: paste gambar",
+                "size": 36_000_000, "published": "2026-11-16T00:00:00Z"}
+        dlg = UpdateDialog(info)
+        text = "\n".join(w.toPlainText() for w in dlg.findChildren(QTextBrowser))
+        self.assertIn("tambah editor", text)
+        self.assertIn("paste gambar", text)
+
     def test_worker_batches_deltas(self):
         """Delta dari agent digabung sebelum dikirim ke UI (bukan 1 signal/token)."""
         from clyve_ide.qt_app import AgentWorker

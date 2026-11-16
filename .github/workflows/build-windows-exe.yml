@@ -18,6 +18,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # butuh histori + tag untuk menyusun catatan rilis
 
       - uses: actions/setup-python@v5
         with:
@@ -103,13 +105,22 @@ jobs:
           $setup = Get-ChildItem "dist/AIClyveIDELite-Setup-*.exe" | Select-Object -First 1
           Copy-Item $setup.FullName "dist/AIClyveIDELite-Setup.exe" -Force
 
+          # Catatan rilis: commit sejak tag sebelumnya, supaya dialog update di
+          # app menampilkan perubahan nyata (bukan "lihat catatan rilis").
+          $prev = (git tag --sort=-creatordate | Select-Object -Skip 1 -First 1)
+          $range = if ($prev) { "$prev..HEAD" } else { "-15" }
+          $notes = (git log --pretty=format:"- %s" $range) -join "`n"
+          if (-not $notes) { $notes = "Tidak ada catatan rilis." }
+          if ($notes.Length -gt 3500) { $notes = $notes.Substring(0, 3500) }
+
           # latest.json untuk host statis / updater manifest.
           $manifest = [ordered]@{
             version = "${{ steps.ver.outputs.version }}"
             url     = "https://github.com/nearclyve/ai-clyve-ide-lite/releases/latest/download/AIClyveIDELite-Setup.exe"
             name    = "AIClyveIDELite-Setup.exe"
             size    = (Get-Item $setup.FullName).Length
-            notes   = "Lihat catatan rilis v${{ steps.ver.outputs.version }}"
+            notes   = $notes
+            previous = $prev
           }
           $manifest | ConvertTo-Json | Set-Content "dist/latest.json" -Encoding utf8
           dir dist
