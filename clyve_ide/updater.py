@@ -23,6 +23,10 @@ from pathlib import Path
 from .version import APP_ID, REPO, __version__, is_newer
 
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
+# Manifest di setiap rilis (asset latest.json). Ini jalur utama karena
+# github.com tidak punya kuota 60 request/jam seperti api.github.com — 403
+# rate-limit di API adalah penyebab "cek update gagal" yang paling sering.
+DEFAULT_MANIFEST = f"https://github.com/{REPO}/releases/latest/download/latest.json"
 UA = f"{APP_ID}/{__version__} (+https://github.com/{REPO})"
 
 
@@ -60,16 +64,19 @@ def manifest_url() -> str:
         return env
     try:
         from . import config
-        brand = config.load_brand()
-        return str(brand.get("update_url") or "").strip()
+        brand = str(config.load_brand().get("update_url") or "").strip()
+        if brand:
+            return brand
     except Exception:  # noqa: BLE001
-        return ""
+        pass
+    return DEFAULT_MANIFEST
 
 
 def _check_manifest(url: str, timeout: int) -> tuple[dict | None, str]:
     data = _get_json(url, timeout=timeout)
     if not data:
-        return None, f"manifest tidak bisa dibaca: {url}"
+        status = _http_status(url, timeout=timeout)
+        return None, f"manifest tidak bisa dibaca ({status}): {url}"
     latest = str(data.get("version") or "")
     if not latest or not is_newer(latest, __version__):
         return None, ""
@@ -88,15 +95,28 @@ def _check_manifest(url: str, timeout: int) -> tuple[dict | None, str]:
 
 
 def _http_status(url: str, timeout: int = 12) -> str:
+    """Status + alasan dari server (rate limit, private, proxy blokir)."""
     req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
                                                "User-Agent": UA})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return f"HTTP {r.status}"
     except urllib.error.HTTPError as e:
-        return f"HTTP {e.code}"
+        detail = ""
+        try:
+            raw = e.read(800).decode("utf-8", "replace")
+            detail = str(json.loads(raw).get("message") or "") or raw[:160]
+        except Exception:  # noqa: BLE001
+            pass
+        remaining = (e.headers or {}).get("X-RateLimit-Remaining") if e.headers else None
+        reset = (e.headers or {}).get("X-RateLimit-Reset") if e.headers else None
+        if remaining == "0" and reset and str(reset).isdigit():
+            import time as _t
+            when = _t.strftime("%H:%M", _t.localtime(int(reset)))
+            detail = (detail + f" (kuota API GitHub habis, reset {when})").strip()
+        return f"HTTP {e.code}" + (f": {detail}" if detail else "")
     except Exception as e:  # noqa: BLE001
-        return f"{type(e).__name__}"
+        return f"{type(e).__name__}: {e}"
 
 
 def check_detailed(timeout: int = 12) -> tuple[dict | None, str]:
@@ -107,16 +127,27 @@ def check_detailed(timeout: int = 12) -> tuple[dict | None, str]:
     tidak pernah bisa melihat rilis.
     """
     url = manifest_url()
+    manifest_err = ""
     if url:
         info, err = _check_manifest(url, timeout)
-        if info or err:
-            return info, err
+        if info:
+            return info, ""
+        manifest_err = err
+        if err and url != DEFAULT_MANIFEST:
+            return None, err     # manifest custom (brand/env) gagal: jangan fallback
 
     rel = _get_json(API_LATEST, timeout=timeout)
     if not rel:
         status = _http_status(API_LATEST, timeout=timeout)
-        hint = "repo private / rilis belum ada" if status in ("HTTP 404", "HTTP 403") else status
-        return None, f"GitHub API {status} ({hint})"
+        hint = ""
+        if "HTTP 404" in status:
+            hint = " (repo private / rilis belum ada)"
+        if "rate limit" in status.lower() or "kuota" in status.lower():
+            hint = " (rate limit GitHub; manifest rilis juga gagal dibaca)"
+        msg = f"GitHub API {status}{hint}"
+        if manifest_err:
+            msg += f" | {manifest_err}"
+        return None, msg
     tag = str(rel.get("tag_name") or "")
     if not tag:
         return None, "respons GitHub tanpa tag_name"

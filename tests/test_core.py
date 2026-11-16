@@ -124,6 +124,25 @@ class UpdaterTest(unittest.TestCase):
             updater.manifest_url, updater._get_json, updater._http_status = (
                 old_url, old_get, old_status)
 
+    def test_default_manifest_url(self):
+        self.assertIn("github.com", updater.DEFAULT_MANIFEST)
+        self.assertTrue(updater.DEFAULT_MANIFEST.endswith("/latest.json"))
+        self.assertNotIn("api.github.com", updater.DEFAULT_MANIFEST)
+
+    def test_rate_limit_message_is_specific(self):
+        old = (updater.manifest_url, updater._get_json, updater._http_status)
+        try:
+            updater.manifest_url = lambda: updater.DEFAULT_MANIFEST
+            updater._get_json = lambda url, timeout=12: None
+            updater._http_status = lambda url, timeout=12: (
+                "HTTP 403: API rate limit exceeded (kuota API GitHub habis, reset 10:00)")
+            info, err = updater.check_detailed()
+            self.assertIsNone(info)
+            self.assertIn("HTTP 403", err)
+            self.assertIn("rate limit", err)
+        finally:
+            updater.manifest_url, updater._get_json, updater._http_status = old
+
     def test_private_repo_404_reports_error(self):
         old_url, old_get, old_status = (updater.manifest_url, updater._get_json,
                                         updater._http_status)
